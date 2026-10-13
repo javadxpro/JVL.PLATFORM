@@ -1,0 +1,42 @@
+{
+  "name": "jvl-platform",
+  "version": "4.0.0",
+  "description": "Volexturn — سرور محلی (LAN) چت، استوری، پست، ویس‌چت و سرورهای بازی برای index.html",
+  "private": true,
+  "type": "commonjs",
+  "main": "server/index.js",
+  "bin": {
+    "jvl": "server/cli.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "start": "node server/cli.js start",
+    "dev": "node --watch server/cli.js start",
+    "admin": "node server/cli.js create-admin",
+    "stats": "node server/cli.js stats",
+    "test": "node --test --experimental-sqlite tests/*.test.js"
+  },
+  "dependencies": {
+    "aedes": "^1.2.0",
+    "express": "^5.3.0",
+    "mqtt": "^5.16.0",
+    "multer": "^2.4.0",
+    "socket.io": "^4.8.4",
+    "socket.io-client": "^4.8.4",
+    "vazirmatn": "^33.0.3",
+    "ws": "^8.22.0"
+  },
+  "keywords": [
+    "lan",
+    "chat",
+    "socket.io",
+    "express",
+    "volexturn"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "jsdom": "^30.1.2"
+  }
+}
