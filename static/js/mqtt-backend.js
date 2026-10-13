@@ -41,7 +41,17 @@
 
     /* سقف حجم رسانه در MQTT — بروکرهای عمومی بستهٔ ~۱MB دارند و base64 هم
        حجم را ۴/۳ می‌کند، پس هدف را کوچک نگه می‌داریم. */
-    const MEDIA_LIMIT = 190 * 1024;
+    /*
+     * سقف رسانه در حالت MQTT:
+     *  - عکس/صوت کوتاه داخل یک پیام retained (بروکرهای عمومی ~۱MB سقف بسته دارند،
+     *    و base64 حجم را ۳۳٪ باد می‌کند، پس ۷۰۰KB متن جای امنی است).
+     *  - ویدیو/فایل بزرگ‌تر فقط در چت و به‌صورت تکه‌تکه (غیر retained = موقتی).
+     */
+    const MEDIA_LIMIT = 700 * 1024;
+    const CHUNK_TEXT = 120 * 1024;          /* اندازهٔ هر تکهٔ base64 */
+    const STREAM_LIMIT = 10 * 1024 * 1024;  /* سقف ویدیو در چت */
+    const PART_TTL_MS = 120000;             /* انتقال نیمه‌تمام بعد از این مدت دور ریخته می‌شود */
+    const MEDIA_CACHE_MAX = 60;
 
     const memoryLS = (() => {
         const m = new Map();
@@ -59,7 +69,7 @@
         appVersion: '4.0.0',
         appName: 'Volexturn',
         storyTtlHours: 24,
-        mediaLimit: MEDIA_LIMIT
+        mediaLimit: MEDIA_LIMIT, streamLimit: STREAM_LIMIT, chunkText: CHUNK_TEXT
     };
 
     const P = () => `jvl/${Config.networkKey}/v1`;
@@ -299,6 +309,10 @@
     function applyMessageEvent(event, groupId) {
         const self = me();
         const myId = self ? self.id : null;
+        if (event.t === 'chunk') {
+            receiveChunk(event);
+            return;
+        }
         if (event.t === 'msg') {
             /* بروکر پیام را به فرستنده هم اکو می‌کند؛ یک بار بیشتر ثبت نشود */
             if (msgCache.some(x => x.id === event.m.id)) return;
@@ -530,8 +544,71 @@
 
     /* ───────── رسانه ───────── */
 
+    /** رسانهٔ آمادهٔ نمایش: id → data URL */
+    const mediaCache = new Map();
+    /** انتقالهای در جریان: id → { n, mime, got, at } */
+    const mediaParts = new Map();
+
+    function putMedia(id, dataUrl) {
+        mediaCache.set(id, dataUrl);
+        /* حافظه بی‌نهایت نشود: قدیمی‌ترین‌ها دور ریخته شوند */
+        while (mediaCache.size > MEDIA_CACHE_MAX) {
+            const oldest = mediaCache.keys().next();
+            if (oldest.done) break;
+            mediaCache.delete(oldest.value);
+        }
+    }
+
+    function sweepParts() {
+        const t = Date.now();
+        for (const [id, p] of mediaParts) if (t - p.at > PART_TTL_MS) mediaParts.delete(id);
+    }
+
+    /** یک تکه رسید؛ وقتی کامل شد data URL ساخته می‌شود */
+    function receiveChunk(ev) {
+        if (!ev || !ev.id || ev.from === (me() ? me().id : null)) return;
+        sweepParts();
+        let part = mediaParts.get(ev.id);
+        if (!part) { part = { n: Number(ev.n) || 1, mime: ev.mime || 'application/octet-stream', got: new Map(), at: Date.now() }; mediaParts.set(ev.id, part); }
+        part.at = Date.now();
+        if (!part.got.has(ev.i)) part.got.set(ev.i, String(ev.d || ''));
+        socketEmit('download_progress', { id: ev.id, got: part.got.size, total: part.n });
+        if (part.got.size < part.n) return;
+        let b64 = '';
+        for (let i = 0; i < part.n; i++) b64 += part.got.get(i) || '';
+        mediaParts.delete(ev.id);
+        putMedia(String(ev.id), 'data:' + part.mime + ';base64,' + b64);
+        /* صفحه گفتگو را دوباره رندر می‌کند تا جای «در حال دریافت» پر شود */
+        socketEmit('message_updated', { media: String(ev.id) });
+    }
+
+    /**
+     * رسانهٔ بزرگ را تکه‌تکه روی همان تاپیک رویدادها می‌فرستد.
+     * غیر retained است، یعنی دقیقاً «موقتی»: فقط همان لحظه به گیرندهٔ آنلاین می‌رسد.
+     */
+    async function sendChunks(topics, id, dataUrl, mime) {
+        const comma = dataUrl.indexOf(',');
+        const b64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+        const n = Math.max(1, Math.ceil(b64.length / Config.chunkText));
+        for (let i = 0; i < n; i++) {
+            const d = b64.slice(i * Config.chunkText, (i + 1) * Config.chunkText);
+            for (const t of topics) publish(t, { t: 'chunk', id: String(id), from: me().id, i, n, mime, d }, { retain: false, qos: 1 });
+            socketEmit('upload_progress', { id: String(id), sent: i + 1, total: n });
+            /* هر چند تکه یک‌بار حلقهٔ رویداد را آزاد کن تا UI قفل نشود */
+            if (i % 6 === 5) await new Promise(r => setTimeout(r, 0));
+        }
+        return n;
+    }
+
+    /** شناسهٔ یکتای رسانه + ثبت فوری در کش خودمان (سمت فرستنده) */
+    function beginStream(dataUrl, mime) {
+        const id = 'm' + newId().toString(36) + Math.random().toString(36).slice(2, 6);
+        putMedia(id, dataUrl);
+        return { id, mime };
+    }
+
     /** فایل → data URL فشرده (چون هیچ دیسکی در کار نیست) */
-    function fileToMedia(file) {
+    function fileToMedia(file, opts = {}) {
         return new Promise((resolve, reject) => {
             if (!file) return reject(new Error('فایلی انتخاب نشده'));
             const type = (file.type || '').toLowerCase();
@@ -540,23 +617,43 @@
             const isAudio = type.startsWith('audio/') || ['mp3', 'wav', 'ogg', 'm4a', 'webm', 'weba', 'opus'].includes(ext);
             const isVideo = type.startsWith('video/') || ['mp4', 'mkv', 'mov', 'avi', 'flv', '3gp'].includes(ext);
 
-            if (isVideo) return reject(new Error('ویدیو در حالت MQTT پشتیبانی نمی‌شود (حجم زیاد است) — عکس بفرست'));
-            if (!isImage && !isAudio) return reject(new Error('در حالت MQTT فقط عکس و صوت کوتاه'));
+            const kind = isImage ? 'image' : (isVideo ? 'video' : (isAudio ? 'audio' : null));
+            if (!kind) return reject(new Error('در حالت MQTT فقط عکس، صوت و ویدیو'));
+            /* ویدیو و فایل‌های بزرگ فقط در چت و به‌صورت تکه‌تکه */
+            const canStream = !!opts.allowStream;
+            if (!isImage && !canStream) {
+                return reject(new Error(kind === 'video'
+                    ? 'ویدیو فقط در چت ارسال می‌شود (برای استوری و پست عکس بفرست)'
+                    : 'در این بخش فقط عکس می‌شود فرستاد'));
+            }
+            if (file.size > Config.streamLimit) {
+                return reject(new Error(`حجم فایل بیشتر از ${(Config.streamLimit / 1048576).toFixed(0)}MB است`));
+            }
 
             const reader = new FileReader();
             reader.onerror = () => reject(new Error('خواندن فایل ناموفق بود'));
             reader.onload = () => {
                 const dataUrl = String(reader.result);
                 if (dataUrl.length <= Config.mediaLimit * 1.4) {
-                    return resolve({ media: dataUrl, file_type: isImage ? 'image' : 'audio', compressed: false });
+                    return resolve({ media: dataUrl, file_type: kind, compressed: false, stream: false, mime: type || mimeOf(kind, ext) });
+                }
+                if (canStream) {
+                    /* ویدیو و صوت/عکس بزرگ: دست‌نخورده، ولی تکه‌تکه فرستاده می‌شود */
+                    return resolve({ media: dataUrl, file_type: kind, compressed: false, stream: true, mime: type || mimeOf(kind, ext) });
                 }
                 if (!isImage) return reject(new Error(`صوت بزرگ‌تر از ${(Config.mediaLimit / 1024).toFixed(0)}KB است — کوتاه‌تر ضبط کن`));
                 compressImageTo(dataUrl, Config.mediaLimit)
-                    .then(out => resolve({ media: out, file_type: 'image', compressed: true }))
+                    .then(out => resolve({ media: out, file_type: 'image', compressed: true, stream: false, mime: 'image/jpeg' }))
                     .catch(() => reject(new Error('فشرده‌سازی عکس ناموفق بود')));
             };
             reader.readAsDataURL(file);
         });
+    }
+
+    function mimeOf(kind, ext) {
+        if (kind === 'image') return 'image/jpeg';
+        if (kind === 'video') return ext === 'webm' ? 'video/webm' : 'video/mp4';
+        return ext === 'ogg' || ext === 'opus' ? 'audio/ogg' : (ext === 'wav' ? 'audio/wav' : 'audio/mpeg');
     }
 
     function compressImageTo(dataUrl, targetBytes) {
@@ -640,7 +737,7 @@
     route('GET', '/api/app_info', () => ok({
         name: Config.appName, version: Config.appVersion, transport: 'mqtt',
         broker: Config.broker, network: Config.networkKey,
-        limits: { image: Config.mediaLimit, video: 0, file: Config.mediaLimit },
+        limits: { image: Config.mediaLimit, video: Config.streamLimit, file: Config.streamLimit },
         story_ttl_hours: Config.storyTtlHours
     }));
     route('GET', '/api/health', () => ok({ ok: true, version: Config.appVersion, transport: 'mqtt', connected: ready }));
@@ -731,11 +828,20 @@
         const replyToId = body && body.reply_to_id ? Number(body.reply_to_id) : null;
 
         let media = null, fileType = null, fileName = null;
+        let rawMedia = null, streamInfo = null;
         const file = meta && meta.file;
         if (file) {
             try {
-                const out = await fileToMedia(file);
-                media = out.media; fileType = out.file_type; fileName = file.name || null;
+                /* چت تنها جایی است که رسانهٔ بزرگ/ویدیو به‌صورت تکه‌تکه می‌رود */
+                const out = await fileToMedia(file, { allowStream: true });
+                fileType = out.file_type; fileName = file.name || null;
+                if (out.stream) {
+                    streamInfo = beginStream(out.media, out.mime);
+                    rawMedia = out.media;
+                    media = 'media:' + streamInfo.id;   /* ارجاع، نه خودِ داده */
+                } else {
+                    media = out.media;
+                }
             } catch (ex) { return err(ex.message || 'ارسال فایل ناموفق بود'); }
         }
         if (!content && !media) return err('پیام خالی است');
@@ -757,6 +863,12 @@
         if (groupId) emitToGroup(groupId, 'msg', payload);
         else emitToUsers([receiverId, self.id], 'msg', payload);
         socketEmit('new_message', serializeMessage(m));
+
+        /* اول پیام می‌رسد (با جای خالی رسانه)، بعد تکه‌ها یکی‌یکی */
+        if (streamInfo) {
+            const topics = groupId ? [`${P()}/evt/group/${groupId}`] : [`${P()}/evt/dm/${receiverId}`];
+            sendChunks(topics, streamInfo.id, rawMedia, streamInfo.mime).catch(() => { /* ignore */ });
+        }
         return ok({ success: true, message: serializeMessage(m) });
     });
 
@@ -1369,13 +1481,18 @@
         return { body: {}, file: null };
     }
 
+    /**
+     * FileReader فقط Blob واقعی می‌خواند، پس آبجکت معمولی برنمی‌گردانیم.
+     * در مرورگر مقدارِ FormData همیشه File است؛ در نود Blob بی‌نام است که
+     * آن را در یک File می‌پیچیم تا name داشته باشد.
+     */
     function blobToFile(blob) {
-        return {
-            name: blob.name || 'file',
-            type: blob.type || '',
-            size: blob.size || 0,
-            arrayBuffer: () => blob.arrayBuffer()
-        };
+        try {
+            if (typeof File !== 'undefined' && !(blob instanceof File)) {
+                return new File([blob], blob.name || 'file', { type: blob.type || 'application/octet-stream' });
+            }
+        } catch { /* ignore */ }
+        return blob;
     }
 
     function jsonResponse({ status, body }) {
@@ -1488,6 +1605,8 @@
         if (value == null || value === '') return '';
         const v = String(value);
         if (v.startsWith('data:') || v.startsWith('blob:')) return v;
+        /* ارجاع به رسانهٔ تکه‌تکه: تا کامل نرسیده، خالی برمی‌گردد */
+        if (v.startsWith('media:')) return mediaCache.get(v.slice(6)) || '';
         return `${basePath()}/files/${kind}/${encodeURIComponent(v)}`;
     }
     root.mediaURL = mediaURL;

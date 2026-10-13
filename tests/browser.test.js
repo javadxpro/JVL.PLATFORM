@@ -111,6 +111,51 @@ test.after(async () => {
     try { await new Promise(r => broker.close(r)); } catch { /* ignore */ }
 });
 
+
+/* ───────── ابزار رسانه ───────── */
+
+/** دو صفحه روی یک شبکه، هر دو واردشده */
+async function twoLoggedIn(key, names) {
+    const pages = [];
+    for (const name of names) {
+        const pg = await openPage(key);
+        pages.push(pg);
+        await waitFor(() => pg.win.JVL && pg.win.JVL.state.ready(), 15000, 'ready ' + name);
+        const set = (id, v) => { pg.win.document.getElementById(id).value = v; };
+        set('authUsername', name); set('authPassword', 'pass1234');
+        pg.win.register();
+        await settle(700);
+        set('authUsername', name); set('authPassword', 'pass1234');
+        pg.win.login();
+        await waitFor(() => pg.win.document.getElementById('appShell').style.display === 'flex', 15000, 'ورود ' + name);
+    }
+    return pages;
+}
+
+/** شناسهٔ کاربر از روی نام */
+async function userId(pg, username) {
+    const r = await pg.win.fetch('/users');
+    const list = await r.json();
+    const u = list.find(x => x.username === username);
+    if (!u) throw new Error('کاربر پیدا نشد: ' + username);
+    return u.id;
+}
+
+/** فایل ساختگی با بایت‌های قابل تشخیص */
+function fakeFile(win, name, type, bytes) {
+    const buf = new Uint8Array(bytes);
+    for (let i = 0; i < bytes; i++) buf[i] = (i * 7 + 13) % 251;
+    return new win.File([buf], name, { type });
+}
+
+async function sendFile(pg, receiverId, file) {
+    const fd = new pg.win.FormData();
+    fd.append('receiver_id', String(receiverId));
+    fd.append('file', file);
+    const r = await pg.win.fetch('/send_message', { method: 'POST', body: fd });
+    return { status: r.status, body: await r.json() };
+}
+
 test('صفحه بالا می‌آید، لایهٔ MQTT فعال است و نوار بالا همهٔ بخش‌ها را دارد', async () => {
     const { win, errors } = await openPage('brz-boot');
 
@@ -188,4 +233,83 @@ test('کاربر دوم می‌تواند کاربر اول را آنلاین ب
 
     assert.deepEqual(a.errors, [], 'خطای صفحهٔ اول: ' + a.errors.join(' | '));
     assert.deepEqual(b.errors, [], 'خطای صفحهٔ دوم: ' + b.errors.join(' | '));
+});
+
+test('عکس کوچک در یک پیام می‌رسد (بدون تکه‌تکه‌شدن)', async () => {
+    const [a, b] = await twoLoggedIn('brz-img', ['mona', 'kia']);
+    const kia = await userId(a, 'kia');
+    const file = fakeFile(a.win, 'shot.png', 'image/png', 40 * 1024);
+
+    const res = await sendFile(a, kia, file);
+    assert.equal(res.status, 200, 'ارسال عکس شکست: ' + JSON.stringify(res.body));
+    assert.equal(res.body.success, true, JSON.stringify(res.body));
+    const fp = res.body.message.file_path;
+    assert.ok(String(fp).startsWith('data:image/png'), 'عکس باید data URL باشد، هست: ' + String(fp).slice(0, 30));
+
+    /* سمت گیرنده هم همان data URL را می‌بیند (بخش peer = فرستنده) */
+    const mona = await userId(b, 'mona');
+    await waitFor(async () => {
+        const r = await b.win.fetch(`/messages/0/${mona}`);
+        const list = await r.json();
+        return list.length && list[list.length - 1].file_path === fp;
+    }, 15000, 'رسیدن عکس به گیرنده');
+    assert.deepEqual(a.errors, [], 'خطا: ' + a.errors.join(' | '));
+});
+
+test('ویدیو تکه‌تکه فرستاده می‌شود و گیرنده همان بایت‌ها را بازسازی می‌کند', async () => {
+    const [a, b] = await twoLoggedIn('brz-vid', ['saman', 'neda']);
+    const neda = await userId(a, 'neda');
+
+    /* ۱٫۵MB → base64 حدود ۲MB، پس حتماً از مسیر تکه‌تکه می‌رود (۱۷ تکه) */
+    const file = fakeFile(a.win, 'clip.mp4', 'video/mp4', 1536 * 1024);
+    const res = await sendFile(a, neda, file);
+    assert.equal(res.status, 200, 'ارسال ویدیو شکست: ' + JSON.stringify(res.body));
+    const fp = String(res.body.message.file_path);
+    assert.match(fp, /^media:[a-z0-9]+$/, 'ویدیو باید ارجاع media:<id> باشد، هست: ' + fp.slice(0, 24));
+    assert.equal(res.body.message.file_type, 'video');
+
+    /* فرستنده فوراً مدیای خودش را دارد */
+    assert.ok(a.win.mediaURL('chat', fp).startsWith('data:video/mp4;base64,'), 'فرستنده مدیا را ندارد');
+
+    /* گیرنده: اول خالی (در انتظار)، بعد data URL کامل */
+    const saman = await userId(b, 'saman');
+    const got = await waitFor(async () => {
+        const r = await b.win.fetch(`/messages/0/${saman}`);
+        const list = await r.json();
+        const m = list[list.length - 1];
+        if (!m) return null;
+        const url = b.win.mediaURL('chat', m.file_path);
+        return url.startsWith('data:video/mp4;base64,') ? url : null;
+    }, 25000, 'بازسازی ویدیو سمت گیرنده');
+
+    /* بایت‌به‌بایت با اصل یکی باشد */
+    const mine = a.win.mediaURL('chat', fp);
+    assert.equal(got.length, mine.length, 'طول مدیای بازسازی‌شده فرق دارد');
+    assert.equal(got, mine, 'محتوای ویدیو با اصل نمی‌خواند');
+    assert.deepEqual(b.errors, [], 'خطای گیرنده: ' + b.errors.join(' | '));
+});
+
+test('ویدیو برای استوری رد می‌شود و پیام روشن می‌دهد', async () => {
+    const [a] = await twoLoggedIn('brz-story', ['tara']);
+    const fd = new a.win.FormData();
+    fd.append('file', fakeFile(a.win, 'clip.mp4', 'video/mp4', 60 * 1024));
+    const r = await a.win.fetch('/create_story', { method: 'POST', body: fd });
+    const body = await r.json();
+    assert.equal(body.success, false);
+    assert.match(body.message, /ویدیو فقط در چت/);
+});
+
+test('فایل بزرگ‌تر از سقفِ لایه رد می‌شود و پیام روشن می‌دهد', async () => {
+    const [a, b] = await twoLoggedIn('brz-big', ['omid', 'roza']);
+    const roza = await userId(a, 'roza');
+    const info = await (await a.win.fetch('/api/app_info')).json();
+    const limit = info.limits.video;
+    assert.ok(limit > 0, 'سقف ویدیو باید در app_info اعلام شود');
+
+    const fd = new a.win.FormData();
+    fd.append('receiver_id', String(roza));
+    fd.append('file', fakeFile(a.win, 'huge.mp4', 'video/mp4', limit + 1024 * 1024));
+    const body = await (await a.win.fetch('/send_message', { method: 'POST', body: fd })).json();
+    assert.equal(body.success, false);
+    assert.match(body.message, /حجم فایل بیشتر از/);
 });
