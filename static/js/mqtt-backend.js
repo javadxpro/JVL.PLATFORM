@@ -328,6 +328,15 @@
             if (pin && pin.message_id === event.m.id) event.m.pinned = true;
             msgCache.push(event.m);
             socketEmit('new_message', event.m);
+            /*
+             * تیک دوم (دریافت): به‌محض رسیدن پیام به این دستگاه، یک رسید
+             * غیر retained برای فرستنده می‌فرستیم. گروه رسید نمی‌خواهد چون
+             * تعداد اعضا نامحدود است و طوفان پیام راه می‌اندازد.
+             */
+            if (myId && !groupId && event.m.receiver_id === myId && event.m.sender_id !== myId) {
+                publish(`${P()}/evt/dm/${event.m.sender_id}`,
+                    { t: 'ack', by: myId, mids: [event.m.id] }, { retain: false });
+            }
         } else if (event.t === 'edit') {
             const m = msgCache.find(x => x.id === event.message_id);
             if (m) { m.content = event.content; m.edited_at = event.edited_at; }
@@ -336,6 +345,15 @@
             const i = msgCache.findIndex(x => x.id === event.message_id);
             if (i >= 0) msgCache.splice(i, 1);
             socketEmit('message_deleted', { message_id: event.message_id });
+        } else if (event.t === 'ack') {
+            /* event.by گیرنده است و mids پیام‌هایی که به دستش رسیده */
+            const ids = new Set((Array.isArray(event.mids) ? event.mids : []).map(Number));
+            let changed = 0;
+            msgCache.forEach(m => {
+                if (ids.has(m.id) && m.sender_id === myId && !m.delivered) { m.delivered = true; changed++; }
+            });
+            /* بدون تغییر هیچ رویدادی منتشر نکن؛ وگرنه حلقهٔ رسید درست می‌شود */
+            if (changed) socketEmit('message_delivered', { message_ids: [...ids], by: event.by });
         } else if (event.t === 'seen') {
             /*
              * event.by خوانده، event.partner صاحب پیام‌هاست؛ پس پیام‌های خوانده‌شده
@@ -851,9 +869,12 @@
     route('GET', '/messages/:me/:peer', async p => {
         const e = needAuth(); if (e) return e;
         const myId = me().id, peer = Number(p.peer);
-        for (const m of msgCache) {
-            if (m.sender_id === peer && m.receiver_id === myId) m.seen = true;
-        }
+        /*
+         * اینجا عمداً وضعیت «خوانده» را عوض نمی‌کنیم. خواندن فقط کار
+         * /seen_messages است، چون همان‌جا رسید برای فرستنده منتشر می‌شود.
+         * اگر اینجا بی‌صدا seen بزنیم، /seen_messages چیزی برای اعلام
+         * نمی‌بیند (updated:0) و تیک آبی هرگز به فرستنده نمی‌رسد.
+         */
         return ok(conversationMessages(myId, peer));
     });
 
@@ -1482,6 +1503,183 @@
         for (const u of allUsers()) publish(`${P()}/evt/dm/${u.id}`, { t: 'clear', by: myId }, { retain: false });
         socketEmit('message_deleted', { all: true, by: myId });
         return ok({ success: true, removed });
+    });
+
+    /* ───────────────────────── کانال (Broadcasting) ─────────────────────────
+     * یک‌طرفه: فقط مالک پست می‌گذارد، بقیه عضو می‌شوند و می‌خوانند.
+     * همه‌چیز پیام retained است؛ با پاک‌شدن شبکه همه‌چیز می‌رود.
+     *   channel/<cid>        → مشخصات کانال
+     *   csub/<cid>/<uid>     → عضویت
+     *   cpost/<cid>/<pid>    → پست کانال
+     *   cview/<pid>/<uid>    → بازدید (مثل view/ پست‌ها)
+     *   ccmt/<pid>/<k>       → گفت‌وگوی زیر پست
+     */
+
+    function channelSubs(cid) { return prefixDocs('csub').filter(d => d.suffix.startsWith(cid + '/')).map(d => Number(d.suffix.split('/')[1])); }
+    function channelPostsOf(cid) {
+        return prefixDocs('cpost')
+            .filter(d => d.suffix.startsWith(cid + '/'))
+            .map(d => d.value)
+            .sort((a, b) => b.id - a.id);
+    }
+    function serializeChannel(c, myId) {
+        const subs = channelSubs(c.id);
+        return {
+            id: c.id, name: c.name, bio: c.bio || '', avatar: c.avatar || null,
+            owner_id: c.owner_id, owner_name: (findUser(c.owner_id) || {}).full_name || 'نامشخص',
+            created_at: c.created_at, public: c.public !== false,
+            subscribers: subs.length, subscribed: subs.indexOf(myId) >= 0,
+            posts: channelPostsOf(c.id).length, is_owner: c.owner_id === myId
+        };
+    }
+    function serializeChannelPost(post, myId) {
+        const author = findUser(post.author_id);
+        const views = prefixDocs('cview').filter(d => d.suffix.startsWith(post.id + '/')).length;
+        return {
+            id: post.id, channel_id: post.cid, author_id: post.author_id,
+            author_name: author ? author.full_name : 'کانال',
+            content: post.content || '', media: post.media || null,
+            file_type: post.file_type || null, file_name: post.file_name || null,
+            timestamp: post.at, views, viewed_by_me: prefixDocs('cview').some(d => d.suffix === post.id + '/' + myId),
+            comments: prefixDocs('ccmt').filter(d => d.suffix.startsWith(post.id + '/')).length
+        };
+    }
+
+    route('POST', '/create_channel', async (p, body) => {
+        const e = needAuth(); if (e) return e;
+        const self = me();
+        const name = String((body && body.name) || '').trim();
+        if (!name) return err('نام کانال را بنویس');
+        if (name.length > 60) return err('نام کانال خیلی بلند است');
+        if (prefixDocs('channel').some(d => d.value.owner_id === self.id && d.value.name === name)) {
+            return err('کانالی با این نام داری');
+        }
+        const cid = newId();
+        const ch = {
+            id: cid, name,
+            bio: String((body && body.bio) || '').slice(0, 200),
+            avatar: null, owner_id: self.id, created_at: now(),
+            public: !(body && body.public === false)
+        };
+        publish(`${P()}/channel/${cid}`, ch);
+        publish(`${P()}/csub/${cid}/${self.id}`, { at: now(), role: 'owner' });
+        broadcast('channels_changed', { channel_id: cid });
+        socketEmit('channels_changed', { channel_id: cid });
+        return ok({ success: true, message: `کانال «${name}» ساخته شد 📢`, channel_id: cid, channel: serializeChannel(ch, self.id) });
+    });
+
+    route('GET', '/channels', async () => {
+        const e = needAuth(); if (e) return e;
+        await connect();
+        const myId = me().id;
+        const list = prefixDocs('channel').map(d => serializeChannel(d.value, myId));
+        /* کانال‌های عضو‌شده اول، بعد بقیه؛ هر دو گروه بر اساس تازگی */
+        list.sort((a, b) => (b.subscribed - a.subscribed) || (b.id - a.id));
+        return ok(list);
+    });
+
+    route('GET', '/channel_info/:cid', async p => {
+        const e = needAuth(); if (e) return e;
+        const c = getDoc(`channel/${Number(p.cid)}`);
+        if (!c) return err('کانال پیدا نشد', 404);
+        return ok(serializeChannel(c, me().id));
+    });
+
+    route('POST', '/channel_subscribe/:cid', async p => {
+        const e = needAuth(); if (e) return e;
+        const myId = me().id, cid = Number(p.cid);
+        const c = getDoc(`channel/${cid}`);
+        if (!c) return err('کانال پیدا نشد', 404);
+        const wasSub = !!getDoc(`csub/${cid}/${myId}`);
+        if (wasSub && c.owner_id === myId) return err('مالک کانال نمی‌تواند عضویتش را لغو کند؛ کانال را حذف کن');
+        if (wasSub) publish(`${P()}/csub/${cid}/${myId}`, null);
+        else publish(`${P()}/csub/${cid}/${myId}`, { at: now() });
+        broadcast('channels_changed', { channel_id: cid });
+        socketEmit('channels_changed', { channel_id: cid });
+        return ok({ success: true, subscribed: !wasSub, subscribers: channelSubs(cid).length });
+    });
+
+    route('POST', '/channel_post/:cid', async (p, body, meta) => {
+        const e = needAuth(); if (e) return e;
+        const self = me(), cid = Number(p.cid);
+        const c = getDoc(`channel/${cid}`);
+        if (!c) return err('کانال پیدا نشد', 404);
+        if (c.owner_id !== self.id && self.role !== 'admin') return err('فقط مالک کانال می‌تواند پست بگذارد', 403);
+        const content = String((body && body.content) || '').trim();
+        let media = null, fileType = null, fileName = null;
+        const file = meta && meta.file;
+        if (file) {
+            try { const out = await fileToMedia(file); media = out.media; fileType = out.file_type; fileName = file.name || null; }
+            catch (ex) { return err(ex.message || 'انتشار ناموفق بود'); }
+        }
+        if (!content && !media) return err('متن بنویس یا فایل انتخاب کن');
+        const pid = newId();
+        const post = { id: pid, cid, author_id: self.id, content, media, file_type: fileType, file_name: fileName, at: now() };
+        publish(`${P()}/cpost/${cid}/${pid}`, post);
+        /* به همهٔ اعضا خبر می‌دهیم تا فیدشان تازه شود */
+        for (const uid of channelSubs(cid)) {
+            if (uid === self.id) continue;
+            publish(`${P()}/evt/notify/${uid}`, { t: 'channel_post', channel_id: cid, channel_name: c.name, post_id: pid, preview: content.slice(0, 60) }, { retain: false });
+        }
+        socketEmit('channel_post_added', { channel_id: cid, post: serializeChannelPost(post, self.id) });
+        broadcast('channel_post_added', { channel_id: cid, post_id: pid });
+        return ok({ success: true, message: 'منتشر شد 📢', post: serializeChannelPost(post, self.id) });
+    });
+
+    route('GET', '/channel_posts/:cid', async p => {
+        const e = needAuth(); if (e) return e;
+        const myId = me().id, cid = Number(p.cid);
+        if (!getDoc(`channel/${cid}`)) return err('کانال پیدا نشد', 404);
+        return ok(channelPostsOf(cid).map(x => serializeChannelPost(x, myId)));
+    });
+
+    route('POST', '/channel_view/:pid', async (p, body) => {
+        const e = needAuth(); if (e) return e;
+        const myId = me().id, pid = Number(p.pid);
+        const cid = Number((body && body.channel_id) || 0);
+        if (!getDoc(`cpost/${cid}/${pid}`)) return err('پست پیدا نشد', 404);
+        if (!getDoc(`cview/${pid}/${myId}`)) publish(`${P()}/cview/${pid}/${myId}`, { at: now() });
+        return ok({ success: true, views: prefixDocs('cview').filter(d => d.suffix.startsWith(pid + '/')).length });
+    });
+
+    route('POST', '/channel_comment/:pid', async (p, body) => {
+        const e = needAuth(); if (e) return e;
+        const self = me(), pid = Number(p.pid);
+        const cid = Number((body && body.channel_id) || 0);
+        if (!getDoc(`cpost/${cid}/${pid}`)) return err('پست پیدا نشد', 404);
+        const content = String((body && body.content) || '').trim();
+        if (!content) return err('متن نظر خالی است');
+        if (content.length > 500) return err('نظر خیلی بلند است');
+        const id = newId();
+        const cmt = { id, pid, cid, user_id: self.id, user_name: self.full_name, content, at: now() };
+        publish(`${P()}/ccmt/${pid}/${id}`, cmt);
+        socketEmit('channel_comment_added', { post_id: pid, comment: cmt });
+        return ok({ success: true, comment: cmt });
+    });
+
+    route('GET', '/channel_comments/:pid', async p => {
+        const e = needAuth(); if (e) return e;
+        const pid = Number(p.pid);
+        const list = prefixDocs('ccmt').filter(d => d.suffix.startsWith(pid + '/')).map(d => d.value).sort((a, b) => a.id - b.id);
+        return ok(list);
+    });
+
+    route('DELETE', '/channel_delete/:cid', async p => {
+        const e = needAuth(); if (e) return e;
+        const self = me(), cid = Number(p.cid);
+        const c = getDoc(`channel/${cid}`);
+        if (!c) return err('کانال پیدا نشد', 404);
+        if (c.owner_id !== self.id && self.role !== 'admin') return err('فقط مالک کانال یا مدیر می‌تواند حذف کند', 403);
+        for (const d of prefixDocs('csub').filter(x => x.suffix.startsWith(cid + '/'))) publish(`${P()}/${'csub/' + d.suffix}`, null);
+        for (const d of channelPostsOf(cid)) {
+            publish(`${P()}/cpost/${cid}/${d.id}`, null);
+            for (const v of prefixDocs('cview').filter(x => x.suffix.startsWith(d.id + '/'))) publish(`${P()}/${'cview/' + v.suffix}`, null);
+            for (const k of prefixDocs('ccmt').filter(x => x.suffix.startsWith(d.id + '/'))) publish(`${P()}/${'ccmt/' + k.suffix}`, null);
+        }
+        publish(`${P()}/channel/${cid}`, null);
+        broadcast('channels_changed', { channel_id: cid, removed: true });
+        socketEmit('channels_changed', { channel_id: cid, removed: true });
+        return ok({ success: true, message: 'کانال حذف شد' });
     });
 
     /* ───────── جایگزین window.fetch ───────── */

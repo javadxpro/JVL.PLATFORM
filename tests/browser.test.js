@@ -471,6 +471,128 @@ test('همسان‌سازی مخاطبین: شمارهٔ ثبت‌شده با ه
     assert.deepEqual(a.errors, [], 'خطا: ' + a.errors.join(' | '));
 });
 
+test('کانال: مالک منتشر می‌کند، مشترک می‌خواند و نظر می‌دهد', async () => {
+    const [a, b] = await twoLoggedIn('dbg-chan', ['amin', 'bahar']);
+
+    /* مالک کانال می‌سازد */
+    const created = await (await a.win.fetch('/create_channel', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'اخبار فناوری', bio: 'تازه‌های دنیای tech' })
+    })).json();
+    assert.equal(created.success, true, JSON.stringify(created));
+    const cid = created.channel_id;
+    assert.equal(created.channel.is_owner, true, 'سازنده باید مالک باشد');
+    assert.equal(created.channel.subscribed, true, 'مالک خودش مشترک است');
+
+    /* کانال روی MQTT به کاربر دوم می‌رسد */
+    const channelsOf = async (w) => (await w.fetch('/channels')).json();
+    await waitFor(async () => (await channelsOf(b.win)).some(c => c.id === cid), 15000, 'رسیدن کانال به کاربر دوم');
+    const seen = (await channelsOf(b.win)).find(c => c.id === cid);
+    assert.equal(seen.name, 'اخبار فناوری');
+    assert.equal(seen.owner_name, 'amin', 'نام مالک باید از روی user doc بیاید');
+    assert.equal(seen.is_owner, false);
+    assert.equal(seen.subscribed, false);
+
+    /* عضویت */
+    const sub = await (await b.win.fetch('/channel_subscribe/' + cid, { method: 'POST' })).json();
+    assert.equal(sub.success, true);
+    assert.equal(sub.subscribed, true);
+    assert.equal(sub.subscribers, 2, 'مالک + یک مشترک');
+
+    /* غیرمالک حق انتشار ندارد */
+    const denied = await (await b.win.fetch('/channel_post/' + cid, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'من هم می‌خواهم پست بگذارم' })
+    })).json();
+    assert.equal(denied.success, false, 'غیرمالک باید رد شود');
+
+    /* مالک منتشر می‌کند */
+    const posted = await (await a.win.fetch('/channel_post/' + cid, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'نسخهٔ جدید منتشر شد 🚀' })
+    })).json();
+    assert.equal(posted.success, true, JSON.stringify(posted));
+    const pid = posted.post.id;
+
+    /* مشترک همان پست را می‌بیند */
+    const postsOf = async (w) => (await w.fetch('/channel_posts/' + cid)).json();
+    await waitFor(async () => (await postsOf(b.win)).some(p => p.id === pid), 15000, 'رسیدن پست به مشترک');
+    const got = (await postsOf(b.win)).find(p => p.id === pid);
+    assert.equal(got.content, 'نسخهٔ جدید منتشر شد 🚀');
+    assert.equal(got.viewed_by_me, false, 'هنوز بازدید نشمرده شده');
+
+    /* بازدید شمرده می‌شود و تکراری شمارش نمی‌شود */
+    const v1 = await (await b.win.fetch('/channel_view/' + pid, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel_id: cid })
+    })).json();
+    const v2 = await (await b.win.fetch('/channel_view/' + pid, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ channel_id: cid })
+    })).json();
+    assert.equal(v1.views, 1, 'اولین بازدید');
+    assert.equal(v2.views, 1, 'بازدید تکراری نباید بشمارد');
+
+    /* نظر زیر پست */
+    const cmt = await (await b.win.fetch('/channel_comment/' + pid, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: 'عالی بود 👌', channel_id: cid })
+    })).json();
+    assert.equal(cmt.success, true);
+    const cmts = await (await b.win.fetch('/channel_comments/' + pid)).json();
+    assert.equal(cmts.length, 1);
+    assert.equal(cmts[0].user_name, 'bahar');
+    assert.equal(cmts[0].content, 'عالی بود 👌');
+
+    /* مالک نمی‌تواند عضویت خودش را لغو کند؛ کانالش یتیم می‌شود */
+    const ownerLeave = await (await a.win.fetch('/channel_subscribe/' + cid, { method: 'POST' })).json();
+    assert.equal(ownerLeave.success, false, 'مالک نباید بتواند عضویتش را لغو کند');
+
+    /* حذف توسط غیرمالک ممنوع است */
+    const delDenied = await (await b.win.fetch('/channel_delete/' + cid, { method: 'DELETE' })).json();
+    assert.equal(delDenied.success, false, 'غیرمالک نباید بتواند حذف کند');
+
+    /* حذف توسط مالک: پست‌ها، عضویت‌ها، بازدیدها و نظرها هم پاک می‌شوند */
+    const del = await (await a.win.fetch('/channel_delete/' + cid, { method: 'DELETE' })).json();
+    assert.equal(del.success, true);
+    await waitFor(async () => !(await channelsOf(a.win)).some(c => c.id === cid), 15000, 'کانال باید ناپدید شود');
+    for (const t of a.win.JVL.state.topics()) {
+        assert.ok(!/\/c(post|sub|view|cmt)\//.test(t) || !t.includes('/' + cid + '/'), 'بقایای کانال پاک نشد: ' + t);
+    }
+
+    assert.deepEqual(a.errors, [], 'خطا: ' + a.errors.join(' | '));
+    assert.deepEqual(b.errors, [], 'خطا: ' + b.errors.join(' | '));
+});
+
+test('تیک سه‌حالته: ارسال ← دریافت ← خوانده‌شدن', async () => {
+    const [a, b] = await twoLoggedIn('dbg-ticks', ['kian', 'lili']);
+    const aid = await userId(a, 'kian'), bid = await userId(b, 'lili');
+
+    await openChat(a, bid);
+    a.win.document.getElementById('chatMessageInput').value = 'سلام، حالت چطوره؟';
+    a.win.sendMessage();
+    await settle(400);
+
+    const mine = () => a.win.JVL.state.msgCache.find(x => x.content === 'سلام، حالت چطوره؟');
+    const m = mine();
+    assert.ok(m, 'پیام در کش فرستنده ثبت نشد');
+    assert.ok(!m.seen, 'پیام نباید از ابتدا خوانده باشد');
+
+    /* گیرنده پیام را می‌گیرد و لایهٔ MQTT خودش رسید می‌فرستد */
+    await waitFor(async () => {
+        const got = b.win.JVL.state.msgCache.find(x => x.id === m.id);
+        return !!got;
+    }, 15000, 'رسیدن پیام به گیرنده');
+    await waitFor(async () => !!mine().delivered, 15000, 'رسیدن رسید تحویل به فرستنده');
+    assert.equal(mine().seen, false, 'تحویل‌شدن نباید جای خوانده‌شدن را بگیرد');
+
+    /* حالا گیرنده گفتگو را باز می‌کند → خوانده شد */
+    await openChat(b, aid);
+    await waitFor(async () => !!mine().seen, 15000, 'خوانده‌شدن پیام');
+    assert.equal(mine().delivered, true, 'رسید تحویل باید سر جایش بماند');
+
+    assert.deepEqual(a.errors, [], 'خطا: ' + a.errors.join(' | '));
+    assert.deepEqual(b.errors, [], 'خطا: ' + b.errors.join(' | '));
+});
+
 test('PWA: مانیفست و service worker معتبر هستند', () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.webmanifest'), 'utf8'));
     assert.equal(manifest.dir, 'rtl');

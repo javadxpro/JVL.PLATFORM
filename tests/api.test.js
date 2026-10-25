@@ -385,6 +385,93 @@ test('حذف پست و پاک‌کردن همهٔ پیام‌ها توسط اد�
     assert.equal((await alice.get('/api/admin/stats')).body.total_messages, 0);
 });
 
+let channelId;
+let channelPostId;
+
+test('کانال: ساخت، عضویت، انتشار، بازدید و نظر', async () => {
+    /* ساخت کانال توسط alice */
+    const created = await alice.post('/create_channel', { name: 'اخبار سرور', bio: 'تازه‌ها' });
+    assert.equal(created.body.success, true, JSON.stringify(created.body));
+    channelId = created.body.channel_id;
+    assert.equal(created.body.channel.is_owner, true);
+    assert.equal(created.body.channel.subscribed, true, 'مالک خودش مشترک است');
+    assert.equal(created.body.channel.subscribers, 1);
+
+    /* نام تکراری برای همان مالک رد می‌شود */
+    assert.equal((await alice.post('/create_channel', { name: 'اخبار سرور' })).body.success, false);
+    /* نام خالی رد می‌شود */
+    assert.equal((await alice.post('/create_channel', { name: '' })).body.success, false);
+
+    /* bob کانال را در لیست می‌بیند ولی هنوز عضو نیست */
+    const listForBob = (await bob.get('/channels')).body;
+    const seen = listForBob.find(c => c.id === channelId);
+    assert.ok(seen, 'کانال در لیست bob نیست');
+    assert.equal(seen.subscribed, false);
+    assert.equal(seen.is_owner, false);
+    assert.equal(seen.owner_name, 'alice');
+
+    /* عضویت */
+    const sub = await bob.post(`/channel_subscribe/${channelId}`);
+    assert.equal(sub.body.subscribed, true);
+    assert.equal(sub.body.subscribers, 2);
+
+    /* غیرمالک حق انتشار ندارد */
+    const denied = await bob.post(`/channel_post/${channelId}`, { content: 'من هم می‌خوام' });
+    assert.equal(denied.status, 403);
+    assert.equal(denied.body.success, false);
+
+    /* مالک منتشر می‌کند */
+    const posted = await alice.post(`/channel_post/${channelId}`, { content: 'نسخهٔ جدید آمد 🚀' });
+    assert.equal(posted.body.success, true, JSON.stringify(posted.body));
+    channelPostId = posted.body.post.id;
+    assert.equal(posted.body.post.content, 'نسخهٔ جدید آمد 🚀');
+    assert.equal(posted.body.post.views, 0);
+
+    /* bob همان پست را می‌بیند */
+    const posts = (await bob.get(`/channel_posts/${channelId}`)).body;
+    assert.equal(posts.length, 1);
+    assert.equal(posts[0].id, channelPostId);
+    assert.equal(posts[0].viewed_by_me, false);
+
+    /* بازدید شمرده می‌شود و تکراری نه */
+    const v1 = await bob.post(`/channel_view/${channelPostId}`, { channel_id: channelId });
+    const v2 = await bob.post(`/channel_view/${channelPostId}`, { channel_id: channelId });
+    assert.equal(v1.body.views, 1);
+    assert.equal(v2.body.views, 1, 'بازدید تکراری نباید بشمارد');
+
+    /* نظر زیر پست */
+    const cmt = await bob.post(`/channel_comment/${channelPostId}`, { content: 'عالی 👌', channel_id: channelId });
+    assert.equal(cmt.body.success, true, JSON.stringify(cmt.body));
+    /*
+     * نام نمایشی bob در تستِ پروفایل عوض شده، پس روی مقدار ثابت حساب نمی‌کنیم؛
+     * مهم این است که نامِ نویسنده از جدول users بیاید و دو مسیر یکی باشند.
+     */
+    assert.ok(String(cmt.body.comment.user_name).trim(), 'نام نویسنده خالی است');
+    const cmts = (await bob.get(`/channel_comments/${channelPostId}`)).body;
+    assert.equal(cmts.length, 1);
+    assert.equal(cmts[0].content, 'عالی 👌');
+    assert.equal(cmts[0].user_name, cmt.body.comment.user_name, 'GET و POST باید یک نام بدهند');
+
+    /* نظر خالی رد می‌شود */
+    assert.equal((await bob.post(`/channel_comment/${channelPostId}`, { content: '  ' })).body.success, false);
+
+    /* مالک نمی‌تواند عضویتش را لغو کند */
+    assert.equal((await alice.post(`/channel_subscribe/${channelId}`)).body.success, false);
+
+    /* غیرمالک نمی‌تواند حذف کند */
+    const delDenied = await bob.del(`/channel_delete/${channelId}`);
+    assert.equal(delDenied.status, 403);
+
+    /* کانال ناشناس ۴۰۴ می‌دهد */
+    assert.equal((await bob.get('/channel_info/999999')).status, 404);
+    assert.equal((await bob.get('/channel_posts/999999')).status, 404);
+
+    /* حذف توسط مالک: پست‌ها، عضویت‌ها، بازدیدها و نظرها هم می‌روند */
+    assert.equal((await alice.del(`/channel_delete/${channelId}`)).body.success, true);
+    assert.ok(!(await alice.get('/channels')).body.some(c => c.id === channelId));
+    assert.equal((await bob.get(`/channel_posts/${channelId}`)).status, 404);
+});
+
 test('حذف کاربر همهٔ داده‌هایش را می‌برد', async () => {
     assert.equal((await alice.del(`/api/admin/delete_user/${eve.user.id}`)).body.success, true);
     assert.equal((await alice.get('/users')).body.length, 2);

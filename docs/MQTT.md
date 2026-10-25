@@ -192,3 +192,36 @@ ICE: سه STUN عمومی (Google ×۲، Cloudflare). اگر NAT طرفین مت
 ## اپ بومی اندروید
 
 ببین `docs/ANDROID.md`. همان نقشهٔ تاپیک، همان الگوریتم هش، و همان رویدادها.
+
+## کانال (Broadcasting)
+
+یک‌طرفه: فقط مالک منتشر می‌کند، بقیه عضو می‌شوند و می‌خوانند.
+
+| تاپیک | نوع | محتوا |
+|---|---|---|
+| `channel/<cid>` | retained | `{id, name, bio, avatar, owner_id, created_at, public}` |
+| `csub/<cid>/<uid>` | retained | عضویت (`{at}`) |
+| `cpost/<cid>/<pid>` | retained | `{id, cid, author_id, content, media, file_type, file_name, at}` |
+| `cview/<pid>/<uid>` | retained | بازدید — یک بار برای هر کاربر |
+| `ccmt/<pid>/<k>` | retained | `{id, pid, cid, user_id, user_name, content, at}` |
+
+مسیرها: `/create_channel`, `/channels`, `/channel_info/:cid`, `/channel_subscribe/:cid`,
+`/channel_post/:cid`, `/channel_posts/:cid`, `/channel_view/:pid`, `/channel_comment/:pid`,
+`/channel_comments/:pid`, `/channel_delete/:cid`.
+
+قاعده‌ها: فقط مالک (یا مدیر) منتشر و حذف می‌کند؛ مالک نمی‌تواند عضویت خودش را لغو کند
+(کانال یتیم می‌شود)؛ حذف کانال پست‌ها، عضویت‌ها، بازدیدها و نظرها را هم می‌برد.
+همین API عیناً در سرور نود هم پیاده شده (`server/routes/channels.js`) تا دو حالت واگرا نمانند.
+
+## تیک سه‌حالته
+
+`✓` ارسال → `✓✓` تحویل → `✓✓` آبی خوانده‌شدن.
+
+- **تحویل**: وقتی پیام به دستگاه گیرنده می‌رسد، لایهٔ MQTT خودش یک رسید غیر retained
+  `{t:'ack', by, mids:[…]}` به `evt/dm/<فرستنده>` می‌فرستد. گروه‌ها رسید نمی‌گیرند
+  (طوفان پیام راه می‌افتاد).
+- **خوانده‌شدن**: فقط `/seen_messages/:sender` وضعیت را عوض می‌کند و رسید منتشر می‌کند.
+
+> ⚠️ `GET /messages/:me/:peer` **عمداً** وضعیت خوانده را عوض نمی‌کند. قبلاً بی‌صدا
+> `seen` می‌زد و بعد `/seen_messages` چیزی برای اعلام نمی‌دید (`updated:0`)، در نتیجه
+> تیک آبی هرگز به فرستنده نمی‌رسید. خواندن فقط کار `/seen_messages` است.

@@ -159,6 +159,49 @@ CREATE TABLE IF NOT EXISTS lan_hosts (
     description TEXT    DEFAULT '',
     created_at  TEXT    NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS channels (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL,
+    bio         TEXT    DEFAULT '',
+    avatar      TEXT    DEFAULT NULL,
+    owner_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    is_public   INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS channel_subs (
+    channel_id  INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    joined_at   TEXT    NOT NULL,
+    PRIMARY KEY (channel_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS channel_posts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel_id  INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    author_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    content     TEXT    DEFAULT '',
+    file_path   TEXT    DEFAULT NULL,
+    file_name   TEXT    DEFAULT NULL,
+    file_type   TEXT    DEFAULT NULL,
+    created_at  TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS channel_post_views (
+    post_id     INTEGER NOT NULL REFERENCES channel_posts(id) ON DELETE CASCADE,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    viewed_at   TEXT    NOT NULL,
+    PRIMARY KEY (post_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS channel_comments (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    post_id     INTEGER NOT NULL REFERENCES channel_posts(id) ON DELETE CASCADE,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    content     TEXT    NOT NULL,
+    created_at  TEXT    NOT NULL
+);
 `;
 
 /* ───────── ابزار زمان ───────── */
