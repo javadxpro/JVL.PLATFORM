@@ -10,6 +10,7 @@ const fs = require('node:fs');
 const Config = require('./config');
 const { setDb, getDb } = require('./db');
 
+const ban = require('./ban');
 const metaRoutes = require('./routes/meta');
 const authRoutes = require('./routes/auth');
 const userRoutes = require('./routes/users');
@@ -30,6 +31,26 @@ function createApp(options = {}) {
     app.disable('x-powered-by');
     app.use(express.json({ limit: '1mb' }));
     app.use(express.urlencoded({ extended: false, limit: '1mb' }));
+
+    /*
+     * بنِ IP قبل از هر مسیر دیگری. اگر بعد از احراز هویت بگذاریمش، کاربر
+     * بن‌شده هنوز می‌تواند به مسیرهای عمومی (login/register) برسد و با یک
+     * نام کاربری تازه برگردد.
+     */
+    app.use((req, res, next) => {
+        const ip = ban.clientIp(req);
+        req.clientIp = ip;
+        let hit = null;
+        try { hit = ban.isIpBanned(getDb(), ip); } catch { return next(); }
+        if (hit) {
+            return res.status(403).json({
+                success: false,
+                banned: true,
+                message: 'دسترسی این نشانی مسدود شده است' + (hit.reason ? ' — ' + hit.reason : '')
+            });
+        }
+        next();
+    });
 
     /* لاگ کوتاه درخواست‌ها (قابل خاموش‌کردن با JVL_QUIET=1) */
     if (!process.env.JVL_QUIET) {

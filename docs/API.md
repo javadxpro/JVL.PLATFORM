@@ -98,9 +98,14 @@
 | مسیر | پاسخ |
 |---|---|
 | `GET /api/admin/stats` | `{total_users, total_groups, total_messages, total_posts, total_likes, total_comments, total_follows, active_stories, online_now}` |
-| `GET /api/admin/users` | `[user]` + `posts_count`, `messages_count`, `last_seen_at` |
+| `GET /api/admin/users` | `[user]` + `posts_count`, `messages_count`, `last_seen_at`, `banned`, `banned_reason`, `banned_at`, `last_ip` — این چهار فیلد فقط در همین مسیر می‌آیند، نه در `serializeUser` عمومی |
 | `POST /api/admin/promote_user/:id` | `{success, user}` |
 | `POST /api/admin/demote_user/:id` | `{success, user}` — تنزل خود مجاز نیست |
+| `POST /api/admin/ban_user/:id` | `{reason?, ban_ip?=true, cidr?}` → `{success, message, user, banned_ip, ip_error, kicked}` — حساب و نشانی آخرین نشست با هم بسته می‌شوند؛ بنِ خود مجاز نیست |
+| `POST /api/admin/unban_user/:id` | `{unban_ip?=false}` → `{success, message, user, unbanned_ip}` — بازگرداندن نشانی اختیاری است |
+| `GET /api/admin/banned_ips` | `[{ip, reason, banned_by, banned_by_name, created_at}]` |
+| `POST /api/admin/ban_ip` | `{ip, reason?}` → `{success, ip}` — `ip` تک‌نشانی یا CIDR است (`91.98.7.0/24`)؛ بستن `127.0.0.1`/`::1` رد می‌شود |
+| `DELETE /api/admin/unban_ip/:ip` | `{success}` — اگر نشانی در فهرست نباشد ۴۰۴ |
 | `DELETE /api/admin/delete_user/:id` | `{success}` — فایل‌ها هم پاک می‌شوند؛ حذف خود مجاز نیست |
 | `DELETE /api/admin/delete_post/:id` | `{success}` |
 | `DELETE /api/admin/clear_all_messages` | `{success, removed}` |
@@ -111,6 +116,10 @@
 
 ```js
 user        { id, username, full_name, bio, avatar, role: "user"|"admin", created_at, is_online }
+
+> پاسخ هر مسیرِ بن‌شده `{success:false, banned:true, message}` با وضعیت **۴۰۳** است.
+> این پاسخ قبل از هر مسیری برمی‌گردد — از جمله `/login` و `/register` — پس با حساب
+> تازه نمی‌شود از بن رد شد.
 message     { id, sender_id, sender_name, receiver_id, group_id, content,
               file_path, file_name, file_type: "image"|"video"|"audio"|"file",
               reply_to_id, reply_content, reply_file_name, reply_sender_name,
@@ -160,6 +169,7 @@ lan_host    { id, user_id, full_name, username, game_name, ip_address, port, des
 | `post_deleted` | `{post_id}` | حذف پست توسط مدیر |
 | `follow_update` | `{target_id, follower_id, following}` | تغییر وضعیت دنبال‌کردن |
 | `voice_signal` | `{room, sender, signal}` | رلهٔ سیگنال WebRTC |
+| `banned` | `{message, ip?}` | بن‌شدن حساب یا نشانی — بلافاصله بعدش اتصال قطع می‌شود و کلاینت نشست را پاک می‌کند |
 
 > اتاق‌ها `user:<id>` و نام خام اتاق ویس هستند. رویدادهای مربوط به گروه به اتاق
 > `user:` همهٔ اعضا فرستاده می‌شوند، چون کلاینت هرگز عضو اتاق گروه نمی‌شود.

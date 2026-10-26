@@ -223,4 +223,33 @@ test('لایک پست روی سوکت همه منتشر می‌شود', async ()
     b.s.disconnect();
 });
 
+test('بن شدن، اتصال زندهٔ سوکت را همان لحظه قطع می‌کند', async () => {
+    const b = connect(bob);
+    b.on('banned');
+    await connected(b);
+    b.s.emit('join', { user_id: bob.user.id });
+    await waitFor(b.events, 'user_status').catch(() => { /* اولین join قبلاً خورده */ });
+
+    /* بن با ban_ip=true: همه از 127.0.0.1 وصل‌اند و بستنش یعنی قفل‌کردن
+       در به روی خودت، پس باید رد شود ولی بنِ کاربر همچنان انجام شود */
+    const r = await alice.post(`/api/admin/ban_user/${bob.user.id}`, { reason: 'اسپم', ban_ip: true });
+    assert.equal(r.body.success, true, JSON.stringify(r.body));
+    assert.equal(r.body.banned_ip, null, 'لوکال‌هاست نباید بسته شود');
+    assert.match(r.body.ip_error, /لوکال‌هاست/);
+
+    const payload = await waitFor(b.events, 'banned');
+    assert.match(payload.message, /مسدود/, 'پیام بن باید برسد');
+    assert.match(payload.message, /اسپم/, 'دلیل بن هم باید در پیام باشد');
+
+    const t0 = Date.now();
+    while (b.s.connected && Date.now() - t0 < 4000) await new Promise(r2 => setTimeout(r2, 25));
+    assert.equal(b.s.connected, false, 'اتصال سوکت باید قطع شود');
+    assert.equal(b.events.filter(e => e.name === 'banned').length, 1, 'رویداد بن نباید دوبار برود');
+
+    /* بقیه را خراب نکن */
+    const off = await alice.post(`/api/admin/unban_user/${bob.user.id}`, { unban_ip: false });
+    assert.equal(off.body.success, true);
+    try { b.s.close(); } catch { /* ignore */ }
+});
+
 test.after(async () => { if (srv) await srv.close(); });

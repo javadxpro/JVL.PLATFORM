@@ -371,6 +371,64 @@ test('پنل مدیر: آمار، ارتقا/تنزل، حذف پست', async ()
     await waitFor(async () => (await bob.get('/posts')).body.every(p => p.id !== posts[0].id), 'حذف پست برای بقیه هم اعمال شود');
 });
 
+/* ───────── بن‌کردن ───────── */
+
+test('بنِ کاربر: نشستش همان لحظه از کار می‌افتد', async () => {
+    const bobUser = bob.T.allUsers().find(u => u.username === 'bob');
+    const aliceId = alice.T.allUsers()[0].id;
+
+    /* غیرمدیر حق بن ندارد؛ مدیر هم نمی‌تواند خودش را بن کند */
+    assert.equal((await bob.post(`/api/admin/ban_user/${aliceId}`, {})).status, 403);
+    assert.equal((await alice.post(`/api/admin/ban_user/${aliceId}`, {})).body.success, false,
+        'بنِ خود باید رد شود وگرنه در را به روی خودت می‌بندی');
+
+    const r = await alice.post(`/api/admin/ban_user/${bobUser.id}`, { reason: 'اسپم' });
+    assert.equal(r.body.success, true, JSON.stringify(r.body));
+    /* در حالت MQTT سروری نیست، پس IP ای هم وجود ندارد — باید صادقانه بگوید */
+    assert.equal(r.body.banned_ip, null);
+    assert.match(r.body.ip_error, /بنِ نشانی ممکن نیست/);
+
+    /* بن باید در کش منتشر شده باشد */
+    await waitFor(() => !!bob.T.getDoc(`ban/${bobUser.id}`), 'رسیدن تاپیک بن به کلاینت bob');
+
+    /* درخواست‌های bob همان لحظه رد می‌شوند، نه در ورود بعدی */
+    const users = await bob.get('/users');
+    assert.equal(users.status, 403);
+    assert.equal(users.body.banned, true);
+    assert.match(users.body.message, /اسپم/, 'دلیل بن باید نشان داده شود');
+});
+
+test('ورود کاربر بن‌شده رد می‌شود ولی فهرست بن‌شده‌ها لو نمی‌رود', async () => {
+    const fresh = loadClient('bob3');
+    await waitFor(() => !!fresh.T.getDoc('uname/bob'), 'رسیدن uname/bob به کلاینت تازه');
+    const banned = await fresh.post('/login', { username: 'bob', password: 'newpass1' });
+    assert.equal(banned.status, 403, 'رمز درست هم نباید کاربر بن‌شده را وارد کند');
+    assert.equal(banned.body.banned, true);
+
+    /* با رمز اشتباه همان ۴۰۱ همیشگی است، پس کسی نمی‌فهمد حساب بن شده */
+    const wrong = await fresh.post('/login', { username: 'bob', password: 'badpass1' });
+    assert.equal(wrong.status, 401);
+    assert.notEqual(wrong.body.banned, true);
+});
+
+test('وضعیت بن در شکل کاربر دیده می‌شود و رفع بن برمی‌گرداند', async () => {
+    const bobUser = alice.T.allUsers().find(u => u.username === 'bob');
+    const seen = (await alice.get('/users')).body.find(u => u.username === 'bob');
+    assert.equal(seen.is_banned, true, 'مدیر باید بداند چه کسی بن است');
+    assert.equal(seen.banned_reason, 'اسپم');
+
+    const off = await alice.post(`/api/admin/unban_user/${bobUser.id}`, {});
+    assert.equal(off.body.success, true);
+    assert.equal(off.body.user.is_banned, false);
+
+    await waitFor(() => !bob.T.getDoc(`ban/${bobUser.id}`), 'رسیدن رفع بن به کلاینت bob');
+    const back = await bob.get('/users');
+    assert.equal(back.status, 200, 'bob باید بتواند دوباره کار کند');
+    const fresh = loadClient('bob4');
+    await waitFor(() => !!fresh.T.getDoc('uname/bob'), 'رسیدن uname/bob به کلاینت تازه');
+    assert.equal((await fresh.post('/login', { username: 'bob', password: 'newpass1' })).status, 200);
+});
+
 test.after(async () => {
     /* کلاینت‌های MQTT را ببند، وگرنه reconnect باز می‌ماند و پروسه تمام نمی‌شود */
     for (const c of allClients) { try { c.mod.shutdown(); } catch { /* ignore */ } }

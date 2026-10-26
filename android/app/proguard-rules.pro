@@ -1,3 +1,0 @@
--keep class org.eclipse.paho.** { *; }
--keep class org.spongycastle.** { *; }
--dontwarn org.eclipse.paho.**

@@ -7,6 +7,7 @@ const Config = require('../config');
 const { getDb, now } = require('../db');
 const { makePasswordRecord, checkPassword, signToken, publicUser } = require('../auth');
 const rt = require('../realtime');
+const ban = require('../ban');
 
 const router = express.Router();
 
@@ -53,7 +54,19 @@ router.post('/login', (req, res) => {
     if (!user || !checkPassword(password, user.password_hash)) {
         return res.status(401).json({ success: false, message: 'نام کاربری یا رمز عبور اشتباه است' });
     }
+    /*
+     * عمداً بعد از بررسی رمز: تا رمز درست نباشد نمی‌گوییم حساب بن شده،
+     * وگرنه فهرستِ حساب‌های بن‌شده لو می‌رود.
+     */
+    if (user.banned) {
+        return res.status(403).json({
+            success: false, banned: true,
+            message: 'حساب کاربری تو مسدود شده است' + (user.banned_reason ? ' — ' + user.banned_reason : '')
+        });
+    }
     db.run('UPDATE users SET last_seen_at = ? WHERE id = ?', now(), user.id);
+    /* برای بن‌شدنِ بعدی، IP همین نشست را نگه می‌داریم */
+    ban.rememberIp(db, user.id, req.clientIp || ban.clientIp(req));
     rt.broadcastUserStatus();
     return res.json({ success: true, user: publicUser(user), token: signToken(user.id) });
 });

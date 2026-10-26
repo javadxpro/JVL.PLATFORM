@@ -8,6 +8,7 @@
 const crypto = require('node:crypto');
 const Config = require('./config');
 const { getDb, now } = require('./db');
+const ban = require('./ban');
 
 const SCRYPT = { N: 16384, r: 8, p: 1, keylen: 64 };
 
@@ -83,7 +84,20 @@ function requireAuth(req, res, next) {
     if (!data) return res.status(401).json({ success: false, message: 'نشست نامعتبر است — دوباره وارد شو' });
     const user = getDb().get('SELECT * FROM users WHERE id = ?', data.sub);
     if (!user) return res.status(401).json({ success: false, message: 'کاربر پیدا نشد' });
-    getDb().run('UPDATE users SET last_seen_at = ? WHERE id = ?', now(), user.id);
+    /*
+     * بن باید همان لحظه اثر کند، نه فقط هنگام ورود بعدی: توکنِ HMAC تا
+     * ساعت‌ها اعتبار دارد وگرنه کاربرِ بن‌شده تا انقضای توکن کارش را می‌کرد.
+     */
+    if (user.banned) {
+        return res.status(403).json({
+            success: false, banned: true,
+            message: 'حساب کاربری تو مسدود شده است' + (user.banned_reason ? ' — ' + user.banned_reason : '')
+        });
+    }
+    const db = getDb();
+    db.run('UPDATE users SET last_seen_at = ? WHERE id = ?', now(), user.id);
+    /* آخرین IP را نگه می‌داریم تا موقع بن‌کردن، همان بن شود */
+    ban.rememberIp(db, user.id, req.clientIp || ban.clientIp(req));
     req.user = user;
     next();
 }

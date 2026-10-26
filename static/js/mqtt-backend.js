@@ -226,6 +226,11 @@
                 const had = cache.has(topic);
                 cache.set(topic, value);
                 fireState(had ? 'doc-updated' : 'doc-added', { topic, value });
+                /* بنِ خودم منتشر شد → صفحه نشست را پاک کند */
+                const self = me();
+                if (self && topic === `${P()}/ban/${self.id}`) {
+                    socketEmit('banned', { message: 'حساب کاربری تو مسدود شد' + (value.reason ? ' — ' + value.reason : '') });
+                }
             }
             return;
         }
@@ -526,10 +531,33 @@
         return {
             id: u.id, username: u.username, full_name: u.full_name, bio: u.bio || '',
             avatar: u.avatar || null, role: u.role || 'user', created_at: u.created_at,
-            is_online: isOnline(u.id)
+            is_online: isOnline(u.id),
+            /* وضعیت بن فقط برای مدیر و برای خود کاربر معنا دارد */
+            is_banned: isBanned(u.id),
+            banned_reason: (banInfo(u.id) || {}).reason || ''
         };
     }
     function allUsers() { return prefixDocs('user').map(d => d.value).sort((a, b) => a.id - b.id); }
+
+    /* ───────────────────────── بن‌کردن ─────────────────────────
+     * تاپیک retained: ban/<uid> → {by, reason, at}
+     *
+     * در این حالت هیچ سروری بین ما و بروکر نیست، پس IP کسی دیده نمی‌شود و
+     * بنِ نشانی ممکن نیست. آنچه ممکن است: بنِ حساب، ردشدن درخواست‌هایش،
+     * و بیرون‌انداختن خودش از نشست همان لحظه.
+     */
+    function isBanned(id) { return !!getDoc(`ban/${id}`); }
+    function banInfo(id) { return getDoc(`ban/${id}`) || null; }
+    function banError(id) {
+        const info = banInfo(id);
+        return {
+            status: 403,
+            body: {
+                success: false, banned: true,
+                message: 'حساب کاربری تو مسدود شده است' + (info && info.reason ? ' — ' + info.reason : '')
+            }
+        };
+    }
     function findUser(id) { return getDoc(`user/${id}`) || null; }
 
     function serializePost(p, meId) {
@@ -751,7 +779,13 @@
 
     const ok = (body, status = 200) => ({ status, body });
     const err = (message, status = 400) => ({ status, body: { success: false, message } });
-    const needAuth = () => (me() ? null : err('وارد نشده‌ای', 401));
+    const needAuth = () => {
+        const u = me();
+        if (!u) return err('وارد نشده‌ای', 401);
+        /* نشست در localStorage مانده؛ بن باید همان لحظه اثر کند نه در ورود بعدی */
+        if (isBanned(u.id)) return banError(u.id);
+        return null;
+    };
 
     const routes = [];
     function route(method, pattern, handler) {
@@ -795,6 +829,8 @@
         if (!user) return err('نام کاربری یا رمز عبور اشتباه است', 401);
         const hash = await sha256((user.salt || '') + password);
         if (hash !== user.pass) return err('نام کاربری یا رمز عبور اشتباه است', 401);
+        /* عمداً بعد از بررسی رمز: فهرست حساب‌های بن‌شده لو نمی‌رود */
+        if (isBanned(user.id)) return banError(user.id);
         return ok({ success: true, user: serializeUser(user), token: `jvl.${user.id}.${hash.slice(0, 12)}` });
     });
 
@@ -1461,6 +1497,33 @@
         if (!doc) return err('کاربر پیدا نشد', 404);
         publish(`${P()}/user/${doc.id}`, { ...doc, role: 'user' });
         return ok({ success: true, user: serializeUser({ ...doc, role: 'user' }) });
+    });
+
+    route('POST', '/api/admin/ban_user/:id', async (p, body) => {
+        const e = adminGuard(); if (e) return e;
+        const id = Number(p.id);
+        if (id === me().id) return err('نمی‌توانی خودت را بن کنی');
+        if (!findUser(id)) return err('کاربر پیدا نشد', 404);
+        const reason = String((body && body.reason) || '').slice(0, 200);
+        publish(`${P()}/ban/${id}`, { by: me().id, reason, at: now() });
+        publish(`${P()}/presence/${id}`, null);   /* از فهرست آنلاین‌ها هم برود */
+        socketEmit('banned', { message: 'حساب کاربری مسدود شد', target: id });
+        return ok({
+            success: true,
+            message: 'کاربر مسدود شد',
+            banned_ip: null,
+            /* صادقانه بگوییم چرا؛ نه اینکه بی‌صدا وانمود کنیم IP بسته شد */
+            ip_error: 'در حالت MQTT هیچ سروری بین شما و بروکر نیست، پس IP کاربران دیده نمی‌شود و بنِ نشانی ممکن نیست.',
+            user: serializeUser(findUser(id))
+        });
+    });
+
+    route('POST', '/api/admin/unban_user/:id', async p => {
+        const e = adminGuard(); if (e) return e;
+        const id = Number(p.id);
+        if (!findUser(id)) return err('کاربر پیدا نشد', 404);
+        publish(`${P()}/ban/${id}`, null);
+        return ok({ success: true, message: 'کاربر رفع بن شد', user: serializeUser(findUser(id)) });
     });
 
     route('DELETE', '/api/admin/delete_user/:id', async p => {

@@ -13,6 +13,7 @@
  */
 
 const { getDb } = require('./db');
+const ban = require('./ban');
 
 let io = null;
 /** userId → Set<socketId> */
@@ -44,6 +45,20 @@ function attach(server, options = {}) {
     });
 
     io.on('connection', socket => {
+        /*
+         * بنِ IP روی سوکت هم اعمال می‌شود؛ وگرنه کاربرِ بن‌شده با همان
+         * اتصالِ باز، رویدادها را می‌گرفت و فقط REST برایش بسته بود.
+         */
+        const ip = ban.clientIp(socket.request || {});
+        let hit = null;
+        try { hit = ban.isIpBanned(getDb(), ip); } catch { /* ignore */ }
+        if (hit) {
+            socket.emit('banned', { message: 'دسترسی این نشانی مسدود شده است' + (hit.reason ? ' — ' + hit.reason : '') });
+            socket.disconnect(true);
+            return;
+        }
+        socket.data.ip = ip;
+
         socket.on('join', data => {
             const uid = Number(data && data.user_id);
             if (!uid) return;
@@ -154,6 +169,40 @@ module.exports = {
     broadcast,
     broadcastUserStatus,
     emitTo: rt_emitTo,
+    /**
+     * بیرون‌انداختن یک کاربر از همهٔ نشست‌هایش.
+     *
+     * عمداً از reset() استفاده نمی‌کنیم: آن یکی کل سرور را می‌بندد و همهٔ
+     * کاربران را قطع می‌کند، در حالی که اینجا فقط بن‌شده باید برود.
+     */
+    kickUser(userId, reason) {
+        if (!io || !userId) return 0;
+        let count = 0;
+        const msg = 'حساب کاربری تو مسدود شد' + (reason ? ' — ' + reason : '');
+        for (const s of io.sockets.sockets.values()) {
+            if (Number(s.data && s.data.userId) === Number(userId)) {
+                s.emit('banned', { message: msg });
+                s.disconnect(true);
+                count++;
+            }
+        }
+        presence.delete(Number(userId));
+        return count;
+    },
+
+    /** بیرون‌انداختن هر اتصال‌هایی که از یک IP (خام یا CIDR) آمده‌اند */
+    kickIp(ip) {
+        if (!io || !ip) return 0;
+        let count = 0;
+        for (const s of io.sockets.sockets.values()) {
+            if (ban.ipMatches(ip, s.data && s.data.ip)) {
+                s.emit('banned', { message: 'دسترسی این نشانی مسدود شد' });
+                s.disconnect(true);
+                count++;
+            }
+        }
+        return count;
+    },
     /** برای تست و خاموش‌کردن سرور: بستن سوکت‌ها و پاک‌کردن حضور */
     reset() { presence.clear(); if (io) { io.close(); io = null; } }
 };

@@ -845,6 +845,19 @@ svg.ic { flex-shrink:0; }
                         <div id="adminUsersList"></div>
                     </div>
                     <div class="admin-section">
+                        <h4>🚫 نشانی‌های مسدود</h4>
+                        <div class="cc-hint" style="font-size:11.5px; color:var(--text-3); line-height:1.8; margin-bottom:8px;">
+                            هر کاربری که بن شود، نشانی IP آخرین نشستش هم بسته می‌شود.
+                            <br><b style="color:var(--warning);">هشدار:</b> اگر خودت و بقیه پشت یک NAT یا مودم مشترک هستید
+                            (خانه، خوابگاه، مدرسه)، بنِ محدوده ممکن است خودت را هم بیرون بیندازد.
+                        </div>
+                        <div style="display:flex; gap:7px; margin-bottom:9px; flex-wrap:wrap;">
+                            <input type="text" id="manualBanIp" dir="ltr" placeholder="91.98.7.211 یا 91.98.7.0/24" style="flex:1; min-width:190px; padding:7px 11px; border-radius:var(--r-md); border:1px solid var(--border); background:var(--surface-2); color:var(--text); font-family:inherit; font-size:12px;">
+                            <button class="btn sm" onclick="banIpManual()">بستن نشانی</button>
+                        </div>
+                        <div id="bannedIpsList"></div>
+                    </div>
+                    <div class="admin-section">
                         <h4>📝 مدیریت پست‌ها</h4>
                         <div id="adminPostsList"></div>
                     </div>
@@ -1502,6 +1515,17 @@ function connectSocket() {
     });
     socket.on('user_status', () => { loadUsers(); renderVoicePeers(); });
     socket.on('groups_changed', () => loadGroups());
+    /*
+     * مدیر بنمان کرده: نشست را پاک می‌کنیم و به صفحهٔ ورود برمی‌گردیم.
+     * بدون این، کاربرِ بن‌شده تا رفرش کردن فکر می‌کرد هنوز وصل است.
+     */
+    socket.on('banned', (d) => {
+        localStorage.removeItem('volexturn_user');
+        localStorage.removeItem('volexturn_token');
+        try { if (window.JVL && JVL.shutdown) JVL.shutdown(); } catch { /* ignore */ }
+        toast((d && d.message) || 'حساب کاربری تو مسدود شد', 'error');
+        setTimeout(() => location.reload(), 1600);
+    });
     socket.on('channels_changed', () => loadChannels());
     socket.on('channel_post_added', (d) => {
         if (selectedChannelId && d && d.channel_id == selectedChannelId) loadChannelPosts();
@@ -2730,13 +2754,16 @@ function loadAdminStats() {
                 <div style="display:flex; align-items:center; gap:9px; min-width:0;">
                     ${avatarHTML(u, 34)}
                     <div style="min-width:0;">
-                        <div class="ar-name">${esc(u.full_name)} ${isAdmin ? '<span class="chip gold">👑 ادمین</span>' : ''} ${isSelf ? '<span class="chip">شما</span>' : ''}</div>
-                        <div class="ar-sub">@${esc(u.username)} · ${faDateLabel(u.created_at)}</div>
+                        <div class="ar-name">${esc(u.full_name)} ${isAdmin ? '<span class="chip gold">👑 ادمین</span>' : ''} ${u.banned ? '<span class="chip" style="background:rgba(239,68,68,.16); color:#f87171;">🚫 بن</span>' : ''} ${isSelf ? '<span class="chip">شما</span>' : ''}</div>
+                        <div class="ar-sub">@${esc(u.username)} · ${faDateLabel(u.created_at)}${u.last_ip ? ' · <span dir="ltr">' + esc(u.last_ip) + '</span>' : ' · <span style="opacity:.6;">IP ثبت نشده</span>'}</div>
                     </div>
                 </div>
                 <div class="ar-actions">
                     ${!isSelf && !isAdmin ? `<button class="btn btn-ghost" style="padding:5px 11px; font-size:11.5px;" onclick="promoteUser(${u.id})">ارتقا 👑</button>` : ''}
                     ${!isSelf && isAdmin ? `<button class="btn btn-ghost" style="padding:5px 11px; font-size:11.5px;" onclick="demoteUser(${u.id})">تنزل</button>` : ''}
+                    ${!isSelf ? (u.banned
+                        ? `<button class="btn btn-ghost" style="padding:5px 11px; font-size:11.5px; color:var(--success,#10b981);" onclick="unbanUser(${u.id})">رفع بن</button>`
+                        : `<button class="btn btn-ghost" style="padding:5px 11px; font-size:11.5px; color:var(--warning); " title="بن + بستن IP" onclick="banUser(${u.id})">🚫 بن</button>`) : ''}
                     ${!isSelf ? `<button class="btn btn-ghost" style="padding:5px 9px; font-size:11.5px; color:var(--danger);" onclick="deleteUser(${u.id})">حذف</button>` : ''}
                 </div>
             `;
@@ -2766,6 +2793,87 @@ function deleteUser(userId) {
         apiFetch(`/api/admin/delete_user/${userId}`, { method:'DELETE' }).then(() => { toast('کاربر حذف شد', 'success'); loadAdminStats(); loadUsers(); });
     });
 }
+/* ═══════════ بن‌کردن کاربر و نشانی ═══════════ */
+
+/**
+ * بنِ IP فقط در حالت سرور معنا دارد: در حالت MQTT/Pages هیچ سروری
+ * بین تو و بروکر عمومی نیست، پس IP کسی دیده نمی‌شود و بنِ نشانی ممکن نیست.
+ */
+function banUser(userId) {
+    const reason = prompt('دلیل بن (اختیاری):', '');
+    if (reason === null) return;   /* لغو */
+    const useCidr = confirm(
+        'نشانی IP کاربر هم بسته شود؟\n\n' +
+        '«باشه» = فقط همین یک IP\n' +
+        '«نه» = کل محدودهٔ /24 (قوی‌تر، چون IP موبایل با هر اتصال عوض می‌شود)\n\n' +
+        '⚠️ اگر پشت NAT مشترک هستید، /24 ممکن است خودت را هم بیرون بیندازد.'
+    );
+    apiFetch(`/api/admin/ban_user/${userId}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason, ban_ip: true, cidr: useCidr ? null : 24 })
+    }).then(r => r.json()).then(res => {
+        if (!res.success) return toast(res.message || 'بن ناموفق بود', 'error');
+        toast(res.message || 'کاربر مسدود شد', 'success');
+        if (res.ip_error) toast(res.ip_error, 'warning');
+        loadAdminStats();
+        loadBannedIps();
+    }).catch(() => toast('این کار فقط در حالت سرور ممکن است', 'error'));
+}
+
+function unbanUser(userId) {
+    const alsoIp = confirm('نشانی IP این کاربر هم باز شود؟');
+    apiFetch(`/api/admin/unban_user/${userId}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ unban_ip: alsoIp })
+    }).then(r => r.json()).then(res => {
+        toast(res.message || (res.success ? 'رفع بن شد' : 'ناموفق'), res.success ? 'success' : 'error');
+        loadAdminStats();
+        loadBannedIps();
+    }).catch(() => toast('این کار فقط در حالت سرور ممکن است', 'error'));
+}
+
+function banIpManual() {
+    const ip = (document.getElementById('manualBanIp').value || '').trim();
+    if (!ip) return toast('نشانی را بنویس', 'error');
+    apiFetch('/api/admin/ban_ip', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip })
+    }).then(r => r.json()).then(res => {
+        toast(res.message || (res.success ? 'بسته شد' : 'ناموفق'), res.success ? 'success' : 'error');
+        if (res.success) document.getElementById('manualBanIp').value = '';
+        loadBannedIps();
+    }).catch(() => toast('این کار فقط در حالت سرور ممکن است', 'error'));
+}
+
+function unbanIp(ip) {
+    apiFetch('/api/admin/unban_ip/' + encodeURIComponent(ip), { method: 'DELETE' })
+        .then(r => r.json()).then(res => {
+            toast(res.message || (res.success ? 'باز شد' : 'ناموفق'), res.success ? 'success' : 'error');
+            loadBannedIps();
+        });
+}
+
+function loadBannedIps() {
+    const box = document.getElementById('bannedIpsList');
+    if (!box) return;
+    apiFetch('/api/admin/banned_ips').then(r => r.json()).then(rows => {
+        if (!Array.isArray(rows) || !rows.length) {
+            box.innerHTML = '<div class="cc-hint" style="font-size:11.5px; color:var(--text-3);">نشانی مسدودی نیست.</div>';
+            return;
+        }
+        box.innerHTML = rows.map(r => `
+            <div class="admin-row">
+                <div style="min-width:0;">
+                    <div class="ar-name" dir="ltr" style="font-family:monospace;">${esc(r.ip)}</div>
+                    <div class="ar-sub">${esc(r.reason || 'بدون دلیل')}${r.banned_by_name ? ' · توسط ' + esc(r.banned_by_name) : ''} · ${faDateLabel(r.created_at)}</div>
+                </div>
+                <div class="ar-actions">
+                    <button class="btn btn-ghost" style="padding:5px 11px; font-size:11.5px; color:var(--success,#10b981);" onclick="unbanIp('${esc(r.ip)}')">باز کردن</button>
+                </div>
+            </div>`).join('');
+    }).catch(() => { box.innerHTML = ''; });
+}
+
 function promoteUser(userId) {
     uiConfirm('این کاربر به ادمین ارتقا پیدا می‌کنه. ادامه بدم؟', () => {
         apiFetch(`/api/admin/promote_user/${userId}`, { method:'POST' }).then(() => { toast('کاربر ارتقا یافت 👑', 'success'); loadAdminStats(); });
@@ -2859,7 +2967,7 @@ function switchTab(tab, el) {
     document.getElementById('tbSub').textContent = meta.sub;
     if (tab === 'explore') loadExplore();
     if (tab === 'lan') loadLanHosts();
-    if (tab === 'admin') loadAdminStats();
+    if (tab === 'admin') { loadAdminStats(); loadBannedIps(); }
     if (tab === 'voice') renderVoicePeers();
     if (tab === 'chat') { loadUsers(); loadGroups(); }
     if (tab === 'profile') refreshNotifUI();
@@ -3137,18 +3245,11 @@ function toggleManualPhones() {
 }
 
 /**
- * خواندن مخاطبین گوشی. سه مسیر به ترتیب تلاش می‌شود:
- *  ۱) پل اپ بومی اندروید (window.JvlBridge)
- *  ۲) Contact Picker API کروم اندروید (navigator.contacts)
- *  ۳) ورود دستی
+ * خواندن مخاطبین گوشی. دو مسیر به ترتیب تلاش می‌شود:
+ *  ۱) Contact Picker API کروم اندروید (navigator.contacts)
+ *  ۲) فایل vcf یا ورود دستی
  */
 async function readDeviceContacts() {
-    try {
-        if (window.JvlBridge && typeof window.JvlBridge.getContacts === 'function') {
-            const raw = window.JvlBridge.getContacts();
-            return JSON.parse(raw);
-        }
-    } catch (e) { /* پل بومی در دسترس نیست */ }
     try {
         if (navigator.contacts && navigator.contacts.select) {
             const picked = await navigator.contacts.select(['name', 'tel'], { multiple: true });

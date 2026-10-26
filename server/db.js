@@ -34,7 +34,21 @@ CREATE TABLE IF NOT EXISTS users (
     avatar        TEXT    DEFAULT NULL,
     role          TEXT    NOT NULL DEFAULT 'user',
     created_at    TEXT    NOT NULL,
-    last_seen_at  TEXT    DEFAULT NULL
+    last_seen_at  TEXT    DEFAULT NULL,
+    /* بن‌شدن: وضعیت کاربر + آخرین IP شناخته‌شدهٔ او */
+    banned        INTEGER NOT NULL DEFAULT 0,
+    banned_at     TEXT    DEFAULT NULL,
+    banned_by     INTEGER DEFAULT NULL,
+    banned_reason TEXT    DEFAULT '',
+    last_ip       TEXT    DEFAULT NULL
+);
+
+CREATE TABLE IF NOT EXISTS banned_ips (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    ip         TEXT    NOT NULL UNIQUE,
+    reason     TEXT    DEFAULT '',
+    banned_by  INTEGER DEFAULT NULL,
+    created_at TEXT    NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -248,7 +262,27 @@ class Db {
 
     migrate() {
         this.db.exec(SCHEMA);
+        this.ensureColumns('users', {
+            banned: 'INTEGER NOT NULL DEFAULT 0',
+            banned_at: 'TEXT DEFAULT NULL',
+            banned_by: 'INTEGER DEFAULT NULL',
+            banned_reason: "TEXT DEFAULT ''",
+            last_ip: 'TEXT DEFAULT NULL'
+        });
         /* WAL روی حافظه معنا ندارد؛ بی‌صدا رد می‌شود */
+        return this;
+    }
+
+    /**
+     * ستون‌های تازه را به جدولِ از قبل موجود اضافه می‌کند.
+     * CREATE TABLE IF NOT EXISTS جدولِ قدیمی را دست نمی‌زند، پس بدون این
+     * مهاجرت هرکس دیتابیس قبلی دارد با «no such column: banned» می‌ترکد.
+     */
+    ensureColumns(table, cols) {
+        const have = new Set(this.all(`PRAGMA table_info(${table})`).map(r => r.name));
+        for (const [name, ddl] of Object.entries(cols)) {
+            if (!have.has(name)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${ddl}`);
+        }
         return this;
     }
 
