@@ -472,6 +472,76 @@ test('کانال: ساخت، عضویت، انتشار، بازدید و نظر'
     assert.equal((await bob.get(`/channel_posts/${channelId}`)).status, 404);
 });
 
+test('Web Push: کلید VAPID، ثبت اشتراک و لغو آن', async () => {
+    /* کلید عمومی بدون احراز هویت در دسترس است — مرورگر قبل از لاگین لازمش دارد */
+    const key = await alice.get('/push_public_key');
+    assert.equal(key.status, 200);
+    assert.equal(key.body.success, true);
+    assert.match(key.body.publicKey, /^B[\w-]{80,}$/, 'کلید VAPID باید یک نقطهٔ فشرده‌نشدهٔ P-256 باشد');
+
+    /* اشتراک نامعتبر رد می‌شود */
+    const bad = await alice.post('/push_subscribe', { endpoint: 'https://push.example/1' });
+    assert.equal(bad.body.success, false, 'بدون کلید p256dh/auth نباید ثبت شود');
+
+    /* اشتراک معتبر ثبت می‌شود */
+    const sub = {
+        endpoint: 'https://push.example.com/send/abc123',
+        p256dh: 'BP' + 'A'.repeat(85),
+        auth: 'Q'.repeat(22)
+    };
+    const okSub = await alice.post('/push_subscribe', sub);
+    assert.equal(okSub.body.success, true, JSON.stringify(okSub.body));
+    assert.equal(okSub.body.devices, 1);
+
+    /* همان endpoint دوباره ثبت شود، ردیف دوم ساخته نمی‌شود */
+    await alice.post('/push_subscribe', sub);
+    assert.equal((await alice.post('/push_subscribe', sub)).body.devices, 1, 'endpoint تکراری نباید بشمارد');
+
+    /* دستگاه دوم با endpoint دیگر اضافه می‌شود */
+    const two = await alice.post('/push_subscribe', Object.assign({}, sub, { endpoint: 'https://push.example.com/send/xyz789' }));
+    assert.equal(two.body.devices, 2);
+
+    /* بدون توکن نمی‌شود اشتراک ثبت کرد */
+    /* کلاینت بدون توکن (ثبت‌نام نکرده) باید ۴۰۱ بگیرد */
+    const anon = await srv.client().post('/push_subscribe', sub);
+    assert.equal(anon.status, 401);
+
+    /* لغو اشتراک */
+    const off = await alice.post('/push_unsubscribe', { endpoint: 'https://push.example.com/send/abc123' });
+    assert.equal(off.body.success, true);
+    assert.equal(off.body.removed, 1);
+    assert.equal(off.body.devices, 1);
+    await alice.post('/push_unsubscribe', { endpoint: 'https://push.example.com/send/xyz789' });
+    assert.equal((await alice.post('/push_unsubscribe', { endpoint: 'nope' })).body.devices, 0);
+});
+
+test('Web Push: سرویس پوش در دسترس نبود، ارسال پیام نباید بشکند', async () => {
+    /*
+     * endpoint مرده روی 127.0.0.1:1 → اتصال رد می‌شود. این دقیقاً همان حالتی
+     * است که اینترنت قطع است یا سرویس پوش جواب نمی‌دهد؛ پیام باید همچنان
+     * ثبت و ارسال شود و فقط پوش بی‌صدا رد شود.
+     */
+    const dead = {
+        endpoint: 'https://127.0.0.1:1/push',
+        p256dh: 'BP' + 'B'.repeat(85),
+        auth: 'C'.repeat(22)
+    };
+    assert.equal((await bob.post('/push_subscribe', dead)).body.success, true);
+
+    const sent = await alice.upload('/send_message', { receiver_id: String(bob.user.id), content: 'پیام با پوشِ خراب' }, null);
+    assert.equal(sent.body.success, true, 'ارسال پیام نباید به‌خاطر پوش شکست بخورد');
+
+    /* pushTo هم باید بدون خطا برگردد و چیزی ارسال‌نشده گزارش دهد */
+    const push = require('../server/push');
+    const { getDb } = require('../server/db');
+    const out = await push.pushTo(getDb(), bob.user.id, { title: 'x', body: 'y' });
+    assert.equal(out.sent, 0, 'endpoint مرده نباید ارسال‌شده حساب شود');
+
+    /* خطای اتصال statusCode ندارد، پس اشتراک نباید پاک شود (فقط ۴۰۴/۴۱۰ مرده است) */
+    assert.equal(push.subscriptionsOf(getDb(), bob.user.id).length, 1, 'اشتراک نباید با خطای موقت پاک شود');
+    await bob.post('/push_unsubscribe', { endpoint: dead.endpoint });
+});
+
 test('حذف کاربر همهٔ داده‌هایش را می‌برد', async () => {
     assert.equal((await alice.del(`/api/admin/delete_user/${eve.user.id}`)).body.success, true);
     assert.equal((await alice.get('/users')).body.length, 2);

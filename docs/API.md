@@ -163,3 +163,35 @@ lan_host    { id, user_id, full_name, username, game_name, ip_address, port, des
 
 > اتاق‌ها `user:<id>` و نام خام اتاق ویس هستند. رویدادهای مربوط به گروه به اتاق
 > `user:` همهٔ اعضا فرستاده می‌شوند، چون کلاینت هرگز عضو اتاق گروه نمی‌شود.
+
+## کانال‌ها
+
+| مسیر | پاسخ |
+|---|---|
+| `POST /create_channel` | `{success, channel_id, channel}` — نام خالی/تکراری رد می‌شود |
+| `GET /channels` | `[channel]` — عضو‌شده‌ها اول؛ هر کدام `subscribers`, `subscribed`, `posts`, `is_owner` |
+| `GET /channel_info/:cid` | `channel` یا ۴۰۴ |
+| `POST /channel_subscribe/:cid` | `{subscribed, subscribers}` — مالک نمی‌تواند عضویتش را لغو کند |
+| `POST /channel_post/:cid` | `{post}` — فقط مالک/مدیر؛ غیرمالک ۴۰۳ |
+| `GET /channel_posts/:cid` | `[post]` با `views`, `viewed_by_me`, `comments` |
+| `POST /channel_view/:pid` | `{views}` — برای هر کاربر یک‌بار شمرده می‌شود |
+| `POST /channel_comment/:pid` | `{comment}` |
+| `GET /channel_comments/:pid` | `[comment]` |
+| `DELETE /channel_delete/:cid` | فقط مالک/مدیر؛ بقیه ۴۰۳ |
+
+## اعلان روی گوشی (Web Push)
+
+| مسیر | پاسخ |
+|---|---|
+| `GET /push_public_key` | `{publicKey}` — بدون احراز هویت؛ کلید VAPID برای `pushManager.subscribe` |
+| `POST /push_subscribe` | `{devices}` — بدنه: `{endpoint, p256dh, auth}` |
+| `POST /push_unsubscribe` | `{removed, devices}` — بدنه: `{endpoint}` |
+
+کلیدهای VAPID یک‌بار ساخته و در `data/vapid.json` (با مجوز ۰۶۰۰) نگه داشته می‌شوند؛
+با `JVL_VAPID_PUBLIC` / `JVL_VAPID_PRIVATE` قابل بازنویسی‌اند. اشتراک‌های مرده
+(۴۰۴/۴۱۰) هنگام ارسال پاک می‌شوند.
+
+| رویداد سوکت | بار | توضیح |
+|---|---|---|
+| `call_offer` | `{to, callId, video, from, fromName}` | رلهٔ تماس + پوش اگر طرف آفلاین باشد |
+| `call_accept` / `call_signal` / `call_reject` / `call_end` | `{to, callId, …, from, fromName}` | رلهٔ سیگنال WebRTC بین دو نفر |

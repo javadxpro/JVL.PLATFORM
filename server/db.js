@@ -195,6 +195,14 @@ CREATE TABLE IF NOT EXISTS channel_post_views (
     PRIMARY KEY (post_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS push_subs (
+    endpoint   TEXT    PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    p256dh     TEXT    NOT NULL,
+    auth       TEXT    NOT NULL,
+    created_at TEXT    NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS channel_comments (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     post_id     INTEGER NOT NULL REFERENCES channel_posts(id) ON DELETE CASCADE,

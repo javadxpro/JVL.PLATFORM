@@ -162,6 +162,10 @@ svg.ic { flex-shrink:0; }
 .contacts-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:16px; margin-top:14px; }
 .contacts-card h3 { font-size:14px; font-weight:800; margin-bottom:4px; display:flex; align-items:center; gap:7px; }
 .contacts-card .cc-hint { font-size:11.5px; color:var(--text-3); line-height:1.7; }
+.notif-row { display:flex; align-items:center; gap:8px; margin-top:11px; flex-wrap:wrap; }
+.notif-state { font-size:11.5px; font-weight:700; padding:4px 10px; border-radius:var(--r-full); background:var(--surface-2); color:var(--text-3); }
+.notif-state.on { background:rgba(16,185,129,.16); color:#34d399; }
+.notif-state.off { background:rgba(239,68,68,.14); color:#f87171; }
 .contact-row { display:flex; align-items:center; gap:10px; padding:9px 4px; border-bottom:1px solid var(--border); }
 .contact-row:last-child { border-bottom:none; }
 .contact-row .cr-tx { min-width:0; flex:1; }
@@ -857,6 +861,18 @@ svg.ic { flex-shrink:0; }
             <!-- ═══ پروفایل ═══ -->
             <div class="page" id="profileTab">
                 <div class="profile-wrap">
+                    <div class="contacts-card" id="notifCard">
+                        <h3>
+                            <svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+                            اعلان روی گوشی
+                        </h3>
+                        <div class="cc-hint" id="notifHint"></div>
+                        <div class="notif-row">
+                            <span class="notif-state" id="notifState"></span>
+                            <button class="btn sm" id="notifBtn" onclick="toggleNotifications()">روشن کردن</button>
+                            <button class="btn sm btn-outline" onclick="testNotification()">آزمایش</button>
+                        </div>
+                    </div>
                     <div class="contacts-card">
                         <h3>
                             <svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -1461,6 +1477,7 @@ function connectSocket() {
     socket.on('connect', () => socket.emit('join', { user_id: currentUser.id }));
     socket.on('new_message', (msg) => {
         const mine = msg.sender_id == currentUser.id;
+        notifyNewMessage(msg);
         if (msg.group_id) {
             if (selectedGroupId == msg.group_id) {
                 appendMessage(msg);
@@ -1578,6 +1595,7 @@ function setSideList(which) {
 function loadUsers() {
     apiFetch('/users').then(r => r.json()).then(users => {
         allUsersCache = users.filter(u => u.id != currentUser.id);
+        handleDeepLink();
         const online = users.filter(u => u.is_online).length;
         document.getElementById('onlineCount').textContent = fa(online);
         renderVoicePeers();
@@ -2839,6 +2857,7 @@ function switchTab(tab, el) {
     if (tab === 'admin') loadAdminStats();
     if (tab === 'voice') renderVoicePeers();
     if (tab === 'chat') { loadUsers(); loadGroups(); }
+    if (tab === 'profile') refreshNotifUI();
 }
 function openLanModal() { document.getElementById('lanModal').classList.add('active'); }
 function openStoryModal() { document.getElementById('newStoryModal').classList.add('active'); }
@@ -3050,6 +3069,7 @@ function bindCallSignals(socket) {
         document.getElementById('ciAvatar').innerHTML = avatarHTML(u, 78).replace(/^<div class="avatar"[^>]*>/, '').replace(/<\/div>$/, '');
         document.getElementById('callIncoming').classList.add('on');
         startRing([880, 660]);
+        notifyIncomingCall(d);
         /* زنگ خوردن طولانی نشود */
         setTimeout(() => { if (incomingCall && incomingCall.callId === d.callId) rejectCall(); }, 45000);
     });
@@ -3392,6 +3412,252 @@ function createChannel() {
     });
 }
 
+/* ═══════════════ اعلان روی گوشی ═══════════════
+ *
+ * دو حالت دارد:
+ *  • اپ باز است یا تبش در پس‌زمینه است → خود صفحه اعلان را نشان می‌دهد.
+ *    این حالت هیچ سروری نمی‌خواهد و روی GitHub Pages هم کار می‌کند.
+ *  • اپ کاملاً بسته است → باید سرویس پوش (FCM/Apple/Mozilla) مرورگر را
+ *    بیدار کند. مرورگر اجازه ندارد مستقیم به سرویس پوش POST بزند (CORS
+ *    جلویش را می‌گیرد)، پس این حالت فقط با سرور نود ممکن است؛ در حالت
+ *    MQTT/Pages خودبه‌خود خاموش می‌ماند.
+ */
+let notifPushSub = null;
+
+function notifSupported() { return typeof window !== 'undefined' && 'Notification' in window; }
+
+function notifGranted() { return notifSupported() && Notification.permission === 'granted'; }
+
+/** کاربر باید خودش روشن کند؛ مرورگر اجازهٔ خودکار نمی‌دهد */
+function notifWanted() { return localStorage.getItem('jvl_notify') === '1'; }
+
+function notifEnabled() { return notifWanted() && notifGranted(); }
+
+async function notifRegistration() {
+    if (!('serviceWorker' in navigator)) return null;
+    try { return await navigator.serviceWorker.getRegistration(); } catch { return null; }
+}
+
+/**
+ * نمایش اعلان واقعی سیستم‌عامل. اول از راه service worker — چون وقتی صفحه در
+ * پس‌زمینه است هم درست کار می‌کند و tag/renotify را می‌فهمد — و اگر نشد از
+ * سازندهٔ سادهٔ Notification.
+ */
+async function notifyOS(title, body, opts = {}) {
+    if (!notifEnabled()) return false;
+    const payload = {
+        body: body || '',
+        icon: 'icon-192.png',
+        badge: 'icon-192.png',
+        dir: 'rtl',
+        lang: 'fa',
+        tag: opts.tag || undefined,
+        renotify: !!opts.tag,
+        data: { url: 'index.html', peer: opts.peer || null, group: opts.group || null, call: opts.call || null }
+    };
+    try {
+        const reg = await notifRegistration();
+        if (reg && reg.showNotification) { await reg.showNotification(title, payload); return true; }
+    } catch { /* می‌افتیم روی حالت ساده */ }
+    try {
+        if (notifGranted()) { new Notification(title, payload); return true; }
+    } catch { /* بعضی مرورگرهای موبایل سازندهٔ مستقیم را قبول ندارند */ }
+    return false;
+}
+
+/** وقتی کاربر دارد همان گفتگو را نگاه می‌کند اعلان نده — فقط مزاحم است */
+function shouldNotifyFor(peerId, groupId) {
+    if (!notifEnabled()) return false;
+    if (document.visibilityState === 'visible') {
+        if (groupId && selectedGroupId == groupId) return false;
+        if (!groupId && peerId && selectedUserId == peerId) return false;
+    }
+    return true;
+}
+
+function notifyNewMessage(msg) {
+    if (!msg) return;
+    if (msg.sender_id == currentUser.id) return;
+    if (!shouldNotifyFor(msg.sender_id, msg.group_id)) return;
+    const isGroup = !!msg.group_id;
+    /*
+     * رویداد زندهٔ new_message فیلد sender_name ندارد (فقط GET /messages آن را
+     * پر می‌کند)، پس نام نمایشی را از کش کاربران می‌گیریم؛ اگر نبود به همان
+     * فیلد و در نهایت به یک برچسب عمومی می‌افتیم.
+     */
+    const sender = allUsersCache.find(x => x.id == msg.sender_id);
+    let who = (sender && sender.full_name) || msg.sender_name || 'پیام جدید';
+    if (isGroup) {
+        const g = (typeof groupsCache !== 'undefined' ? groupsCache : []).find(x => x.id == msg.group_id);
+        who = (g ? g.name : 'گروه') + ' · ' + who;
+    }
+    const body = msg.content
+        || (msg.file_type === 'image' ? '🖼 تصویر'
+        : (msg.file_type || '').startsWith('audio') || /\.webm$/i.test(msg.file_name || '') ? '🎙 پیام صوتی'
+        : '📎 ' + (msg.file_name || 'پیوست'));
+    notifyOS(who, body, {
+        tag: 'dm-' + (isGroup ? 'g' + msg.group_id : msg.sender_id),
+        peer: isGroup ? null : msg.sender_id,
+        group: isGroup ? msg.group_id : null
+    });
+}
+
+function notifyIncomingCall(d) {
+    if (!notifEnabled() || !d) return;
+    const u = allUsersCache.find(x => x.id === d.from);
+    const name = (u && u.full_name) || d.fromName || 'ناشناس';
+    notifyOS('📞 ' + name, d.video ? 'تماس تصویری ورودی' : 'تماس صوتی ورودی',
+        { tag: 'call', peer: d.from, call: d.callId });
+}
+
+async function toggleNotifications() {
+    if (!notifSupported()) { toast('این مرورگر اعلان ندارد', 'error'); return; }
+    if (notifWanted() && notifGranted()) {
+        localStorage.removeItem('jvl_notify');
+        await pushUnsubscribe();
+        refreshNotifUI();
+        toast('اعلان خاموش شد', 'info');
+        return;
+    }
+    let perm;
+    try { perm = await Notification.requestPermission(); } catch { perm = Notification.permission; }
+    if (perm !== 'granted') {
+        refreshNotifUI();
+        toast(perm === 'denied' ? 'مرورگر اجازه را رد کرده؛ از قفلِ کنار آدرس بازش کن' : 'اجازه داده نشد', 'error');
+        return;
+    }
+    localStorage.setItem('jvl_notify', '1');
+    await pushSubscribe();
+    refreshNotifUI();
+    toast('اعلان روشن شد ✅', 'success');
+    notifyOS('Volexturn', 'اعلان‌ها فعال شد. حالا حتی اگر اپ در پس‌زمینه باشد خبرت می‌کنیم.', { tag: 'hello' });
+}
+
+function testNotification() {
+    if (!notifEnabled()) { toast('اول اعلان را روشن کن', 'error'); return; }
+    notifyOS('آزمایش اعلان', 'اگر این را روی نوار اعلان گوشی دیدی، درست کار می‌کند ✅', { tag: 'test' });
+}
+
+async function refreshNotifUI() {
+    const state = document.getElementById('notifState');
+    const btn = document.getElementById('notifBtn');
+    const hint = document.getElementById('notifHint');
+    if (!state || !btn || !hint) return;
+
+    if (!notifSupported()) {
+        state.textContent = 'پشتیبانی نمی‌شود';
+        state.className = 'notif-state off';
+        btn.style.display = 'none';
+        hint.innerHTML = 'این مرورگر API اعلان ندارد.';
+        return;
+    }
+    const perm = Notification.permission;
+    const on = notifEnabled();
+    state.className = 'notif-state ' + (on ? 'on' : 'off');
+
+    if (perm === 'denied') {
+        state.textContent = 'مسدود در مرورگر';
+        btn.style.display = 'none';
+        hint.innerHTML = 'اجازهٔ اعلان در مرورگر رد شده. قفلِ کنار نوار آدرس را بزن و Notifications را روی Allow بگذار.';
+        return;
+    }
+    btn.style.display = '';
+    if (on) {
+        state.textContent = notifPushSub ? 'روشن + پوشِ اپِ بسته' : 'روشن';
+        btn.textContent = 'خاموش کردن';
+        hint.innerHTML = notifPushSub
+            ? 'اعلان حتی وقتی اپ کاملاً بسته است می‌رسد (از راه سرور).'
+            : 'وقتی اپ باز یا در پس‌زمینه باشد اعلان می‌گیری. برای اعلان با اپِ بسته نسخهٔ سرور لازم است.';
+    } else {
+        state.textContent = perm === 'granted' ? 'آماده (خاموش)' : 'خاموش';
+        btn.textContent = 'روشن کردن';
+        hint.innerHTML = 'پیام و تماس روی نوار اعلان گوشی می‌آید. در iOS باید اپ را با Add to Home Screen نصب کرده باشی.';
+    }
+}
+
+/* ── اشتراک Web Push — فقط وقتی سرور نود پشت اپ باشد ── */
+async function pushSubscribe() {
+    notifPushSub = null;
+    try {
+        const reg = await notifRegistration();
+        if (!reg || !reg.pushManager) return;
+        const keyRes = await apiFetch('/push_public_key');
+        const keyInfo = await keyRes.json();
+        /* در حالت MQTT چنین مسیری نیست → بی‌صدا رد می‌شویم */
+        if (!keyRes.ok || !keyInfo || !keyInfo.publicKey) return;
+        const sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlB64ToUint8(keyInfo.publicKey)
+        });
+        const raw = sub.toJSON();
+        const res = await apiFetch('/push_subscribe', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: raw.endpoint, p256dh: raw.keys && raw.keys.p256dh, auth: raw.keys && raw.keys.auth })
+        });
+        if (res.ok) notifPushSub = raw;
+    } catch { /* بدون سرور یا بدون پشتیبانی مرورگر */ }
+    refreshNotifUI();
+}
+
+async function pushUnsubscribe() {
+    try {
+        const reg = await notifRegistration();
+        const sub = reg && reg.pushManager && await reg.pushManager.getSubscription();
+        if (sub) {
+            const raw = sub.toJSON();
+            await apiFetch('/push_unsubscribe', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ endpoint: raw.endpoint })
+            });
+            await sub.unsubscribe();
+        }
+    } catch { /* ignore */ }
+    notifPushSub = null;
+}
+
+function urlB64ToUint8(b64) {
+    const pad = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+    const bin = atob(pad.replace(/-/g, '+').replace(/_/g, '/'));
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+}
+
+/** service worker بعد از کلیک روی اعلان این پیام را می‌فرستد */
+function bindNotificationBridge() {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.addEventListener('message', (e) => {
+        const d = e.data || {};
+        if (d.type !== 'jvl-navigate') return;
+        if (d.group) {
+            const g = groupsCache.find(x => x.id == d.group);
+            if (g) { switchTab('chat'); selectGroup(g); }
+        } else if (d.peer) {
+            openChatWith(d.peer);
+        }
+    });
+}
+
+/**
+ * لینک عمیق: بعد از کلیک روی اعلان، آدرس با ?peer=123 باز می‌شود.
+ * یک‌بار مصرف است چون loadUsers هر بار که به تب چت برویم صدا زده می‌شود.
+ */
+let deepLinkDone = false;
+function handleDeepLink() {
+    if (deepLinkDone) return;
+    try {
+        const q = new URLSearchParams(location.search);
+        const peer = q.get('peer'), group = q.get('group');
+        if (!peer && !group) return;
+        deepLinkDone = true;
+        if (group) {
+            const g = (typeof groupsCache !== 'undefined' ? groupsCache : []).find(x => x.id == group);
+            if (g) { switchTab('chat'); selectGroup(g); return; }
+        }
+        if (peer) { switchTab('chat'); openChatWith(Number(peer)); }
+    } catch { /* ignore */ }
+}
+
 (function boot() {
     // تشخیص مغایرت نسخه صفحه با سرور (مثلاً فایل قدیمی کش‌شده)
     fetch('/api/app_info').then(r => r.json()).then(info => {
@@ -3405,9 +3671,17 @@ function createChannel() {
     /* PWA: نصب‌پذیر و قابل استفادهٔ آفلاین (پوستهٔ برنامه) */
     if ('serviceWorker' in navigator && location.protocol !== 'file:') {
         window.addEventListener('load', () => {
-            navigator.serviceWorker.register('sw.js').catch(() => { /* اختیاری است */ });
+            navigator.serviceWorker.register('sw.js')
+                .then(() => {
+                    /* بعد از ثبت، اگر قبلاً اشتراک پوش داشتیم تازه‌اش کن */
+                    if (notifWanted() && notifGranted()) pushSubscribe();
+                })
+                .catch(() => { /* اختیاری است */ });
         });
     }
+    /* کلیک روی اعلان در service worker و لینک عمیق ?peer= */
+    bindNotificationBridge();
+    refreshNotifUI();
     const savedTheme = localStorage.getItem('volexturn_theme');
     if (savedTheme) document.documentElement.setAttribute('data-theme', savedTheme);
     applyThemeIcons();

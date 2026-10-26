@@ -77,6 +77,44 @@ function attach(server, options = {}) {
             });
         });
 
+        /*
+         * تماس یک‌به‌یک: سیگنال offer/accept/signal/reject/end بین دو نفر رله
+         * می‌شود. رسانه خودش P2P است و از سرور رد نمی‌شود.
+         * برای call_offer، اگر طرف مقابل آنلاین نباشد یک Web Push هم می‌رود تا
+         * گوشی‌اش با اپِ بسته زنگ بخورد.
+         */
+        const relayCall = (event, data) => {
+            if (!data) return;
+            const from = Number((socket.data && socket.data.userId) || data.from) || 0;
+            const to = Number(data.to);
+            if (!from || !to || to === from) return;
+            const actor = getDb().get('SELECT full_name, username FROM users WHERE id = ?', from) || {};
+            const payload = Object.assign({}, data, { from, fromName: actor.full_name || actor.username || '' });
+            rt_emitTo([to], event, payload);
+            return payload;
+        };
+
+        socket.on('call_offer', data => {
+            const payload = relayCall('call_offer', data);
+            if (!payload) return;
+            const to = Number(data.to);
+            if (isOnline(to)) return;
+            /* آفلاین است → اعلان سیستم‌عامل، وگرنه تماس را هیچ‌وقت نمی‌بیند */
+            try {
+                const push = require('./push');
+                const actor = getDb().get('SELECT full_name FROM users WHERE id = ?', payload.from) || {};
+                push.pushTo(getDb(), to, {
+                    title: '\u{1F4DE} ' + (actor.full_name || payload.fromName || 'تماس ورودی'),
+                    body: data.video ? 'تماس تصویری ورودی' : 'تماس صوتی ورودی',
+                    tag: 'call', peer: payload.from, call: data.callId || null, url: 'index.html'
+                }).catch(() => {});
+            } catch { /* ماژول پوش اختیاری است */ }
+        });
+        socket.on('call_accept', data => relayCall('call_accept', data));
+        socket.on('call_signal', data => relayCall('call_signal', data));
+        socket.on('call_reject', data => relayCall('call_reject', data));
+        socket.on('call_end', data => relayCall('call_end', data));
+
         socket.on('disconnect', () => {
             const uid = socket.data && socket.data.userId;
             if (!uid) return;

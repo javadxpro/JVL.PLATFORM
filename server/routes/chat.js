@@ -119,8 +119,49 @@ router.post('/send_message', requireAuth, uploadOne, multerErrorHandler, (req, r
     });
 
     emitToConversation(msg, 'new_message', msg);
+    notifyOffline(msg, req.user);
     res.json({ success: true, message: msg });
 });
+
+/**
+ * اعلان Web Push برای گیرنده‌هایی که الان آنلاین نیستند.
+ *
+ * آنلاین‌ها را عمداً رد می‌کنیم: صفحهٔ بازِ خودشان اعلان را نشان می‌دهد و
+ * اعلان سرویس پوش همزمان، تکراری و مزاحم می‌شود.
+ *
+ * هیچ‌وقت نباید جریان درخواست را معطل یا خراب کند — اگر سرویس پوش در دسترس
+ * نبود، پیام همچنان از راه سوکت می‌رسد.
+ */
+function notifyOffline(msg, actor) {
+    try {
+        const db = getDb();
+        const push = require('../push');
+        const body = msg.content
+            || (msg.file_type === 'image' ? '\u{1F5BC} تصویر'
+            : String(msg.file_type || '').indexOf('audio') === 0 ? '\u{1F399} پیام صوتی'
+            : '\u{1F4CE} ' + (msg.file_name || 'پیوست'));
+        const senderName = (actor && actor.full_name) || 'پیام جدید';
+
+        if (msg.group_id) {
+            const g = db.get('SELECT name FROM groups WHERE id = ?', msg.group_id);
+            const rows = db.all('SELECT user_id FROM group_members WHERE group_id = ?', msg.group_id);
+            const title = (g ? g.name : 'گروه') + ' \u00B7 ' + senderName;
+            for (const r of rows) {
+                if (r.user_id === msg.sender_id || rt.isOnline(r.user_id)) continue;
+                push.pushTo(db, r.user_id, {
+                    title, body, tag: 'dm-g' + msg.group_id,
+                    group: msg.group_id, url: 'index.html'
+                }).catch(() => {});
+            }
+            return;
+        }
+        if (!msg.receiver_id || rt.isOnline(msg.receiver_id)) return;
+        push.pushTo(db, msg.receiver_id, {
+            title: senderName, body, tag: 'dm-' + msg.sender_id,
+            peer: msg.sender_id, url: 'index.html'
+        }).catch(() => {});
+    } catch { /* پوش اختیاری است */ }
+}
 
 /* ───────── دیده‌شدن ───────── */
 

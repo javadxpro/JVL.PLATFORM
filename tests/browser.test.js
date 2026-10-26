@@ -40,12 +40,25 @@ let brokerUrl;
 const openWindows = [];
 
 function patchWindow(win, networkKey, fetchLog) {
-    win.__trace = m => { try { require('node:fs').appendFileSync('/tmp/ctrace.log', m + '\n'); } catch { /* ignore */ } };
     win.WebSocket = WS;
     win.mqtt = require('mqtt');
     win.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} });
     win.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} };
     win.scrollTo = () => {};
+    /*
+     * jsdom پیاده‌سازی Notification ندارد. یک استاب با حافظه می‌گذاریم تا
+     * بتوانیم بفهمیم صفحه واقعاً اعلان داده یا نه. serviceWorker هم نیست،
+     * پس notifyOS به سازندهٔ ساده می‌افتد — همان مسیر پشتیبانِ واقعی.
+     */
+    const shown = [];
+    win.__notifications = shown;
+    class NotifStub {
+        constructor(title, opts) { shown.push({ title, opts: opts || {}, via: 'ctor' }); }
+        close() {}
+    }
+    NotifStub.permission = 'default';
+    NotifStub.requestPermission = () => { NotifStub.permission = 'granted'; return Promise.resolve('granted'); };
+    win.Notification = NotifStub;
     win.URL.createObjectURL = () => 'blob:stub';
     win.URL.revokeObjectURL = () => {};
     Object.defineProperty(win.navigator, 'mediaDevices', {
@@ -590,6 +603,85 @@ test('تیک سه‌حالته: ارسال ← دریافت ← خوانده‌�
     assert.equal(mine().delivered, true, 'رسید تحویل باید سر جایش بماند');
 
     assert.deepEqual(a.errors, [], 'خطا: ' + a.errors.join(' | '));
+    assert.deepEqual(b.errors, [], 'خطا: ' + b.errors.join(' | '));
+});
+
+test('اعلان گوشی: پیام جدید روی نوار اعلان می‌رود، نه برای گفتگوی باز', async () => {
+    const [a, b] = await twoLoggedIn('brz-notif', ['sara', 'tara']);
+    const aid = await userId(a, 'sara');
+    const bid = await userId(b, 'tara');
+
+    /* کارت اعلان در تب پروفایل باید باشد */
+    assert.ok(b.win.document.getElementById('notifCard'), 'کارت اعلان وجود ندارد');
+
+    /* قبل از اجازه گرفتن، اعلان نباید فعال باشد */
+    assert.equal(b.win.notifEnabled(), false, 'بدون اجازه نباید فعال باشد');
+    b.win.testNotification();
+    assert.equal(b.win.__notifications.length, 0, 'بدون اجازه نباید اعلان داد');
+
+    /* کاربر دکمهٔ «روشن کردن» را می‌زند */
+    await b.win.toggleNotifications();
+    assert.equal(b.win.Notification.permission, 'granted');
+    assert.equal(b.win.notifEnabled(), true, 'بعد از اجازه باید فعال شود');
+    assert.equal(b.win.document.getElementById('notifState').textContent, 'روشن');
+    assert.equal(b.win.document.getElementById('notifBtn').textContent, 'خاموش کردن');
+    /* یک اعلان خوش‌آمد هم همان لحظه نشان داده می‌شود */
+    assert.ok(b.win.__notifications.length >= 1, 'اعلان خوش‌آمد نشان داده نشد');
+
+    /* سارا پیام می‌دهد؛ تارا هیچ گفتگویی باز نکرده */
+    await openChat(a, bid);
+    a.win.document.getElementById('chatMessageInput').value = 'سلام تارا';
+    a.win.sendMessage();
+    await waitFor(async () => b.win.__notifications.some(x => x.title === 'sara'), 15000, 'اعلان برای پیام جدید');
+
+    const notif = b.win.__notifications.find(x => x.title === 'sara');
+    assert.equal(notif.opts.body, 'سلام تارا');
+    assert.equal(notif.opts.dir, 'rtl', 'اعلان باید راست‌به‌چپ باشد');
+    assert.equal(notif.opts.lang, 'fa');
+    assert.equal(notif.opts.tag, 'dm-' + aid, 'tag باید per-مخاطب باشد تا اعلان‌ها تلنبار نشوند');
+    assert.equal(notif.opts.data.peer, aid, 'کلیک روی اعلان باید همان گفتگو را باز کند');
+
+    /* حالا تارا همان گفتگو را باز می‌کند → اعلان تکراری مزاحم است */
+    const count = b.win.__notifications.length;
+    await openChat(b, aid);
+    a.win.document.getElementById('chatMessageInput').value = 'پیام دوم';
+    a.win.sendMessage();
+    await waitFor(async () => b.win.JVL.state.msgCache.some(x => x.content === 'پیام دوم'), 15000, 'رسیدن پیام دوم');
+    await settle(600);
+    assert.equal(b.win.__notifications.length, count, 'برای گفتگوی باز نباید اعلان بدهد');
+
+    /* خاموش کردن هم کار کند */
+    await b.win.toggleNotifications();
+    assert.equal(b.win.notifEnabled(), false);
+    assert.equal(b.win.localStorage.getItem('jvl_notify'), null);
+
+    assert.deepEqual(a.errors, [], 'خطا: ' + a.errors.join(' | '));
+    assert.deepEqual(b.errors, [], 'خطا: ' + b.errors.join(' | '));
+});
+
+test('اعلان گوشی: تماس ورودی با نام تماس‌گیرنده اعلام می‌شود', async () => {
+    const logA = [], logB = [];
+    const [a, b] = await twoLoggedIn('brz-notifcall', ['omid', 'nazanin']);
+    installMockRTC(a.win, logA);
+    installMockRTC(b.win, logB);
+
+    const nazanin = await userId(a, 'nazanin');
+    const omid = await userId(b, 'omid');
+
+    /* نازنین اعلان را روشن کرده ولی گفتگویی باز نکرده */
+    await b.win.toggleNotifications();
+    assert.equal(b.win.notifEnabled(), true);
+
+    await openChat(a, nazanin);
+    a.win.startCall(false);
+    await waitFor(async () => b.win.__notifications.some(x => /^📞/.test(x.title)), 15000, 'اعلان تماس ورودی');
+
+    const n = b.win.__notifications.find(x => /^📞/.test(x.title));
+    assert.equal(n.title, '📞 omid', 'نام تماس‌گیرنده باید در اعلان باشد');
+    assert.equal(n.opts.body, 'تماس صوتی ورودی');
+    assert.equal(n.opts.tag, 'call');
+    assert.equal(n.opts.data.peer, omid, 'کلیک روی اعلان باید به همان مخاطب ببرد');
+
     assert.deepEqual(b.errors, [], 'خطا: ' + b.errors.join(' | '));
 });
 
