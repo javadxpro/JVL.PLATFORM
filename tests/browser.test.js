@@ -685,6 +685,152 @@ test('اعلان گوشی: تماس ورودی با نام تماس‌گیرند
     assert.deepEqual(b.errors, [], 'خطا: ' + b.errors.join(' | '));
 });
 
+test('vcf: پارسر vCard هر سه نسخه و نام فارسی QUOTED-PRINTABLE را درست می‌خواند', async () => {
+    const [a] = await twoLoggedIn('brz-vcf1', ['parser']);
+    const parse = a.win.parseVCF;
+
+    /* ۱) خروجی واقعی اندروید: vCard 2.1 با نام فارسیِ QP و soft break */
+    const android = [
+        'BEGIN:VCARD',
+        'VERSION:2.1',
+        'N:;,,,',
+        /* «سارا خانم مهربان» — فاصلهٔ وسط نام با =20 کد شده و «=» آخر soft break است */
+        'FN;ENCODING=QUOTED-PRINTABLE;CHARSET=UTF-8:=D8=B3=D8=A7=D8=B1=D8=A7=20=D8=AE=D8=A7=D9=86=D9=85=20=',
+        ' =D9=85=D9=87=D8=B1=D8=A8=D8=A7=D9=86',
+        'TEL;CELL:+989121234567',
+        'TEL;HOME:021-88776655',
+        'END:VCARD'
+    ].join('\r\n');
+    const c1 = parse(android);
+    assert.equal(c1.length, 1);
+    /* اگر soft break درست باز نشود، وسط نام یک «=» اضافه می‌ماند */
+    assert.equal(c1[0].name, 'سارا خانم مهربان', 'نام QP با soft break درست باز نشد');
+    assert.equal(c1[0].name.indexOf('='), -1, 'soft break جا مانده');
+    assert.equal(c1[0].tels.join('|'), '+989121234567|021-88776655', 'هر دو شماره باید خوانده شوند');
+
+    /* ۲) QP تک‌خطی */
+    const oneLine = 'BEGIN:VCARD\r\nVERSION:2.1\r\nFN;ENCODING=QUOTED-PRINTABLE;CHARSET=UTF-8:' +
+        '=D8=B9=D9=84=DB=8C=20=D8=B1=D8=B6=D8=A7=DB=8C=DB=8C\r\nTEL;CELL:09121110000\r\nEND:VCARD';
+    assert.equal(parse(oneLine)[0].name, 'علی رضایی');
+
+    /* ۳) vCard 3.0: FN، folding معمولی، escape، و چند TEL با TYPE= */
+    const v3 = [
+        'BEGIN:VCARD',
+        'VERSION:3.0',
+        /* دو فاصله: اولی نشانگر fold است و حذف می‌شود، دومی بخشی از مقدار است */
+        'FN:Dr. Maryam;',
+        '  Karimi',
+        'N:Karimi;Maryam;;;Dr.',
+        'TEL;TYPE=CELL,VOICE:+98 912 000 1122',
+        'TEL;TYPE=WORK:+982112345678',
+        'NOTE:line1\\nline2 \\, with comma',
+        'END:VCARD'
+    ].join('\n');
+    const c3 = parse(v3)[0];
+    assert.equal(c3.name, 'Dr. Maryam; Karimi', 'folding باید فقط یک فاصله را حذف کند');
+    assert.equal(c3.tels.join('|'), '+98 912 000 1122|+982112345678');
+
+    /* ۴) vCard 4.0 با VALUE=uri و پیشوند tel: */
+    const v4 = 'BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Reza\r\nTEL;TYPE=cell;VALUE=uri:tel:+989351110000\r\nEND:VCARD';
+    assert.equal(parse(v4)[0].tels.join('|'), '+989351110000', 'پیشوند tel: باید حذف شود');
+
+    /* ۵) بدون FN → نام از N ساخته می‌شود (اول نام، بعد نام‌خانوادگی) */
+    const noFn = 'BEGIN:VCARD\r\nVERSION:3.0\r\nN:رضایی;علی;;;\r\nTEL:09122223344\r\nEND:VCARD';
+    assert.equal(parse(noFn)[0].name, 'علی رضایی');
+
+    /* ۶) کارت بدون شماره به درد همسان‌سازی نمی‌خورد → حذف */
+    const noTel = 'BEGIN:VCARD\r\nVERSION:3.0\r\nFN:بی‌شماره\r\nEMAIL:a@b.c\r\nEND:VCARD';
+    assert.equal(parse(noTel).length, 0);
+
+    /* ۷) PHOTO با base64 بزرگ نباید پارسر را بشکند یا به‌عنوان مقدار خوانده شود */
+    const big = 'A'.repeat(4000);
+    const withPhoto = `BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Neda\r\nPHOTO;ENCODING=b;TYPE=JPEG:${big}\r\nTEL:09123334455\r\nEND:VCARD`;
+    const c7 = parse(withPhoto);
+    assert.equal(c7.length, 1);
+    assert.equal(c7[0].name, 'Neda');
+    assert.equal(c7[0].tels.join('|'), '09123334455');
+
+    /* ۸) چند کارت پشت هم + خطوط خالی + ORG به‌عنوان نامِ پشتیبان */
+    const multi = 'BEGIN:VCARD\nVERSION:3.0\nFN:One\nTEL:09111111111\nEND:VCARD\n\n' +
+                  'BEGIN:VCARD\nVERSION:3.0\nORG:شرکت نمونه\nTEL:09222222222\nEND:VCARD';
+    const c8 = parse(multi);
+    assert.equal(c8.length, 2);
+    assert.equal(c8[1].name, 'شرکت نمونه', 'ORG باید جای خالی FN را پر کند');
+
+    /* ۹) ورودی پوچ نباید بیندازد */
+    assert.equal(parse('').length, 0);
+    assert.equal(parse('BEGIN:VCARD\nEND:VCARD').length, 0);
+
+    assert.deepEqual(a.errors, [], 'خطا: ' + a.errors.join(' | '));
+});
+
+test('vcf: واردکردن فایل، نام دفترچهٔ تلفن را نگه می‌دارد و در فهرست نشان می‌دهد', async () => {
+    const [a, b] = await twoLoggedIn('brz-vcf2', ['importer', 'target']);
+    const tid = await userId(b, 'target');
+
+    /* تارگت شماره‌اش را ثبت می‌کند تا پیدا شدنی باشد */
+    const setRes = await (await b.win.fetch('/set_phone', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: '09121234567' })
+    })).json();
+    assert.equal(setRes.success, true, JSON.stringify(setRes));
+
+    /* منتظر می‌مانیم هشِ retained به کاربر اول برسد */
+    await waitFor(async () => {
+        const r = await (await a.win.fetch('/contacts_lookup', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ hashes: ['09121234567'] })
+        })).json();
+        return r.matches.length === 1;
+    }, 15000, 'رسیدن هش شماره به واردکننده');
+
+    /* فایل vcf با نامی که خودِ کاربر در گوشی‌اش گذاشته، نه نام پلتفرم */
+    const vcf = [
+        'BEGIN:VCARD', 'VERSION:2.1',
+        'FN;ENCODING=QUOTED-PRINTABLE;CHARSET=UTF-8:=D8=B3=D8=A7=D8=B1=D8=A7=20=D8=AE=D8=A7=D9=86=D9=85',
+        'TEL;CELL:+989121234567',
+        'END:VCARD'
+    ].join('\r\n');
+
+    await a.win.importVCF({ files: [{ text: async () => vcf }], value: '' });
+    await waitFor(async () => a.win.savedContacts().some(c => String(c.id) === String(tid)), 15000, 'ثبت مخاطب واردشده');
+
+    const saved = a.win.savedContacts().find(c => String(c.id) === String(tid));
+    assert.equal(saved.local_name, 'سارا خانم', 'نام دفترچهٔ تلفن باید نگه داشته شود');
+    assert.equal(saved.username, 'target');
+
+    assert.equal(a.win.localNameFor(tid), 'سارا خانم');
+
+    /* در نتیجهٔ مقایسه هم نامِ دفترچه اولویت دارد */
+    const html = a.win.document.getElementById('contactsResult').innerHTML;
+    assert.ok(html.indexOf('سارا خانم') >= 0, 'نام دفترچه در نتیجه دیده نمی‌شود');
+
+    /* فهرست چت‌ها هم نام دفترچه را نشان می‌دهد */
+    a.win.document.getElementById('userSearch').value = '';
+    a.win.renderSideList();
+    const row = [...a.win.document.querySelectorAll('#usersList .ui-name')].map(e => e.textContent);
+    assert.ok(row.indexOf('سارا خانم') >= 0, 'فهرست چت باید نام دفترچه را نشان دهد: ' + JSON.stringify(row));
+
+    /* جست‌وجو با نام دفترچه هم کار کند */
+    a.win.document.getElementById('userSearch').value = 'سارا';
+    a.win.renderSideList();
+    assert.equal(a.win.document.querySelectorAll('#usersList .user-item').length, 1, 'جست‌وجو با نام دفترچه');
+
+    /* پاک‌کردن */
+    a.win.document.getElementById('userSearch').value = '';
+    a.win.clearImportedContacts();
+    assert.equal(a.win.savedContacts().length, 0);
+    assert.equal(a.win.localNameFor(tid), '');
+
+    /* شمارهٔ خام هرگز روی شبکه نرفته باشد */
+    for (const t of a.win.JVL.state.topics()) {
+        assert.ok(!/9121234567/.test(t), 'شمارهٔ خام روی MQTT رفت: ' + t);
+    }
+
+    assert.deepEqual(a.errors, [], 'خطا: ' + a.errors.join(' | '));
+    assert.deepEqual(b.errors, [], 'خطا: ' + b.errors.join(' | '));
+});
+
 test('PWA: مانیفست و service worker معتبر هستند', () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.webmanifest'), 'utf8'));
     assert.equal(manifest.dir, 'rtl');

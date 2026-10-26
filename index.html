@@ -891,7 +891,9 @@ svg.ic { flex-shrink:0; }
                                 <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                                 خواندن مخاطبین گوشی
                             </button>
-                            <button class="btn sm ghost" onclick="toggleManualPhones()">واردکردن دستی شماره</button>
+                            <button class="btn sm ghost" onclick="document.getElementById('vcfFileIn').click()">واردکردن فایل vcf</button>
+                            <input type="file" id="vcfFileIn" accept=".vcf,text/vcard,text/x-vcard" style="display:none;" onchange="importVCF(this)">
+                            <button class="btn sm ghost" onclick="clearImportedContacts()">پاک‌کردن واردشده‌ها</button>
                         </div>
                         <textarea id="manualPhones" style="display:none; width:100%; margin-top:10px; min-height:74px;" dir="ltr" placeholder="هر شماره در یک خط&#10;09121234567&#10;+989121234567" oninput="lookupManualPhones()"></textarea>
                         <div id="contactsResult" style="margin-top:10px;"></div>
@@ -1646,6 +1648,7 @@ function renderSideList() {
         const filtered = allUsersCache.filter(u =>
             !q || (u.full_name || '').toLowerCase().includes(q)
                 || (u.username || '').toLowerCase().includes(q)
+                || (localNameFor(u.id) || '').toLowerCase().includes(q)
                 || (q.length > 3 && String(u.id) === q)
         );
         if (!filtered.length) {
@@ -1655,14 +1658,16 @@ function renderSideList() {
         filtered.sort((a, b) => (b.is_online === true) - (a.is_online === true));
         filtered.forEach(u => {
             const n = unreadCounts[u.id] || 0;
+            /* اگر این کاربر را از vcf وارد کرده باشی، نامِ دفترچهٔ تلفنش اولویت دارد */
+            const bookName = localNameFor(u.id);
             const div = document.createElement('div');
             div.className = `user-item ${(!selectedGroupId && selectedUserId == u.id) ? 'active' : ''}`;
             div.onclick = () => selectUser(u);
             div.innerHTML = `
                 ${avatarHTML(u, 40)}
                 <div style="min-width:0;">
-                    <div class="ui-name">${esc(u.full_name)}</div>
-                    <div class="ui-sub">${u.is_online ? 'آنلاین' : 'آفلاین'} · @${esc(u.username)}</div>
+                    <div class="ui-name">${esc(bookName || u.full_name)}</div>
+                    <div class="ui-sub">${u.is_online ? 'آنلاین' : 'آفلاین'} · @${esc(u.username)}${bookName && bookName !== u.full_name ? ' · ' + esc(u.full_name) : ''}</div>
                 </div>
                 ${n ? `<div class="unread-badge">${fa(n)}</div>` : ''}
                 <div class="status-dot ${u.is_online ? 'online' : ''} ${n ? 'has-unread' : ''}"></div>
@@ -3155,6 +3160,174 @@ async function readDeviceContacts() {
     return null;
 }
 
+/* ──────────────── واردکردن فایل vcf (vCard) ────────────────
+ *
+ * چرا پارسر دست‌نویس؟ چون خروجی واقعی گوشی‌ها سه نسخهٔ مختلف vCard می‌دهد و
+ * نام‌های فارسی معمولاً با QUOTED-PRINTABLE کد می‌شوند:
+ *   FN;ENCODING=QUOTED-PRINTABLE;CHARSET=UTF-8:=D8=B3=D8=A7=D8=B1=D8=A7=
+ *    =D8=AE=D8=A7=D9=86=D9=85
+ * اگر این‌ها را درست باز نکنیم، به‌جای «سارا خانم» یک مشت علامت سؤال می‌بینیم.
+ */
+
+/**
+ * خط‌های فیزیکی را به خط‌های منطقی تبدیل می‌کند.
+ * دو جور شکست وجود دارد و با هم فرق دارند:
+ *   • folding معمولی (RFC 6350): خط بعد با فاصله/تب شروع می‌شود و آن یک
+ *     کاراکتر حذف می‌شود.
+ *   • soft break در QUOTED-PRINTABLE: خط با «=» تمام می‌شود؛ هم «=» و هم
+ *     شکست خط حذف می‌شوند (وگرنه وسط کد، یک «=» اضافه جا می‌ماند).
+ */
+function vcfLogicalLines(raw) {
+    const physical = String(raw).split(/\r\n|\r|\n/);
+    const out = [];
+    let qpPending = false;
+    for (const line of physical) {
+        const folded = /^[ \t]/.test(line);
+        if (out.length && (qpPending || folded)) {
+            const prev = out[out.length - 1];
+            out[out.length - 1] = qpPending
+                ? prev.replace(/=\s*$/, '') + line.replace(/^[ \t]+/, '')
+                : prev + line.slice(1);
+        } else {
+            out.push(line);
+        }
+        const last = out[out.length - 1];
+        qpPending = /quoted-printable/i.test(last) && /=\s*$/.test(last);
+    }
+    return out;
+}
+
+/** =XX → بایت، بعد UTF-8. برای =0D=0A هم خروجی درست می‌دهد */
+function decodeQuotedPrintable(text) {
+    const bytes = [];
+    for (let i = 0; i < text.length; i++) {
+        if (text[i] === '=' && /^[0-9A-Fa-f]{2}$/.test(text.substr(i + 1, 2))) {
+            bytes.push(parseInt(text.substr(i + 1, 2), 16));
+            i += 2;
+        } else {
+            bytes.push(text.charCodeAt(i) & 0xFF);
+        }
+    }
+    try { return new TextDecoder('utf-8').decode(new Uint8Array(bytes)); }
+    catch { return text.replace(/=[0-9A-Fa-f]{2}/g, ''); }
+}
+
+function decodeBase64Text(text) {
+    try {
+        const bin = atob(String(text).replace(/\s+/g, ''));
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return new TextDecoder('utf-8').decode(bytes);
+    } catch { return ''; }
+}
+
+/** \, \; \n \\ → کاراکتر واقعی */
+function vcfUnescape(text) {
+    return String(text)
+        .replace(/\\([nN])/g, '\n')
+        .replace(/\\,/g, ',')
+        .replace(/\\;/g, ';')
+        .replace(/\\\\/g, '\\');
+}
+
+/** «NAME;PARAM=VAL;BARE:value» → {name, params, value} با رعایت کوتیشن */
+function vcfParseLine(line) {
+    let i = 0;
+    while (i < line.length && line[i] !== ';' && line[i] !== ':') i++;
+    const name = line.slice(0, i).toUpperCase();
+    const params = [];
+    while (i < line.length && line[i] === ';') {
+        i++;
+        const start = i;
+        let inQuote = false;
+        while (i < line.length) {
+            const ch = line[i];
+            if (ch === '"') inQuote = !inQuote;
+            else if (!inQuote && (ch === ';' || ch === ':')) break;
+            i++;
+        }
+        params.push(line.slice(start, i));
+    }
+    const value = line[i] === ':' ? line.slice(i + 1) : '';
+    return { name, params, value };
+}
+
+/** مقدار یک خاصیت را بر اساس ENCODING/CHARSET باز می‌کند */
+function vcfDecodeValue(params, value) {
+    const joined = params.join(';').toLowerCase();
+    if (/(^|;)encoding=(quoted-printable|b|base64)/.test(joined) || /;b$/.test(joined)) {
+        if (/quoted-printable/.test(joined)) return decodeQuotedPrintable(value);
+        return decodeBase64Text(value);
+    }
+    return value;
+}
+
+/**
+ * متن vcf → [{ name, tels:[…] }]
+ * نام از FN می‌آید و اگر نبود از N (و در نهایت ORG) ساخته می‌شود.
+ */
+function parseVCF(text) {
+    const lines = vcfLogicalLines(text);
+    const cards = [];
+    let card = null;
+
+    for (const raw of lines) {
+        if (!raw || !raw.trim()) continue;
+        const upper = raw.toUpperCase();
+        if (upper.startsWith('BEGIN:VCARD')) { card = { name: '', tels: [], org: '' }; continue; }
+        if (upper.startsWith('END:VCARD')) { if (card) cards.push(card); card = null; continue; }
+        if (!card) continue;
+        /* PHOTO می‌تواند چندصد کیلوبایت base64 باشد؛ اصلاً دستش نمی‌زنیم */
+        if (upper.indexOf('PHOTO') === 0 || upper.indexOf('LOGO') === 0) continue;
+
+        const { name, params, value } = vcfParseLine(raw);
+        const decoded = vcfUnescape(vcfDecodeValue(params, value)).trim();
+
+        if (name === 'FN') {
+            if (decoded) card.name = decoded;
+        } else if (name === 'N') {
+            /* N:Last;First;Middle;Prefix;Suffix — فارسی: اول نام، بعد نام‌خانوادگی */
+            const p = decoded.split(';');
+            const built = [p[3], p[1], p[2], p[0], p[4]].filter(x => x && x.trim()).join(' ').trim();
+            if (built && !card.name) card.name = built;
+        } else if (name === 'ORG') {
+            if (decoded && !card.org) card.org = decoded.split(';')[0];
+        } else if (name === 'TEL' || name === 'TEL;') {
+            const tel = decoded.replace(/^tel:/i, '').trim();
+            if (tel && card.tels.indexOf(tel) < 0) card.tels.push(tel);
+        }
+    }
+
+    /* کارت‌های بدون شماره به درد همسان‌سازی نمی‌خورند */
+    return cards
+        .map(c => ({ name: (c.name || c.org || '').trim(), tels: c.tels }))
+        .filter(c => c.tels.length);
+}
+
+/** شمارهٔ یک مخاطب vcf را با کش محلی پلتفرم مقایسه می‌کند و نام را نگه می‌دارد */
+async function importVCF(input) {
+    const file = input && input.files && input.files[0];
+    if (!file) return;
+    const box = document.getElementById('contactsResult');
+    let text;
+    try { text = await file.text(); }
+    catch { toast('خواندن فایل ناموفق بود', 'error'); return; }
+    finally { if (input) input.value = ''; }
+
+    const cards = parseVCF(text);
+    if (!cards.length) {
+        toast('هیچ مخاطب دارای شماره‌ای در این فایل نبود', 'warning');
+        return;
+    }
+    /* یک مخاطب ممکن است چند شماره داشته باشد؛ همه را با همان نام می‌فرستیم */
+    const list = [];
+    for (const c of cards) for (const tel of c.tels) list.push({ name: c.name, tel });
+
+    toast(`${fa(cards.length)} مخاطب از فایل خوانده شد`, 'success');
+    if (box) box.innerHTML = `<div class="cc-hint">در حال مقایسهٔ ${fa(list.length)} شماره…</div>`;
+    await lookupPhones(list);
+}
+
 async function syncContacts() {
     const list = await readDeviceContacts();
     if (!list) {
@@ -3173,15 +3346,80 @@ async function lookupManualPhones() {
     await lookupPhones(lines.map(tel => ({ name: '', tel })));
 }
 
+/**
+ * دفترچهٔ مخاطبین وارد‌شده، با نام‌های دفترچهٔ تلفن.
+ * فقط روی همین دستگاه نگه داشته می‌شود: نگاشت «نام → شماره» حریم خصوصی
+ * خودِ کاربر است و هرگز روی شبکه منتشر نمی‌شود (روی سیم فقط هش می‌رود).
+ */
+const CONTACTS_KEY = 'jvl_contacts';
+
+function savedContacts() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(CONTACTS_KEY) || '[]');
+        return Array.isArray(raw) ? raw : [];
+    } catch { return []; }
+}
+
+function saveImportedContacts(rows) {
+    const map = new Map(savedContacts().map(c => [String(c.id), c]));
+    for (const r of rows) {
+        if (!r || !r.id) continue;
+        map.set(String(r.id), {
+            id: r.id, username: r.username, full_name: r.full_name,
+            local_name: r.local_name || '', hash: r.hash || '', at: Date.now()
+        });
+    }
+    try { localStorage.setItem(CONTACTS_KEY, JSON.stringify([...map.values()])); } catch { /* پر بود */ }
+}
+
+function clearImportedContacts() {
+    localStorage.removeItem(CONTACTS_KEY);
+    const box = document.getElementById('contactsResult');
+    if (box) box.innerHTML = '';
+    renderSideList();
+    toast('مخاطبین واردشده پاک شدند', 'info');
+}
+
+/** نامی که خودِ کاربر در گوشی‌اش روی این مخاطب گذاشته */
+function localNameFor(userId) {
+    const c = savedContacts().find(x => String(x.id) === String(userId));
+    return (c && c.local_name) || '';
+}
+
 /** هش‌کردن و مقایسه کاملاً سمت خودِ دستگاه انجام می‌شود */
 async function lookupPhones(list) {
     const box = document.getElementById('contactsResult');
-    box.innerHTML = `<div class="cc-hint">در حال مقایسهٔ ${fa(list.length)} شماره…</div>`;
+    const entries = (list || []).filter(c => c && c.tel);
+    box.innerHTML = `<div class="cc-hint">در حال مقایسهٔ ${fa(entries.length)} شماره…</div>`;
+
+    /*
+     * هش هر شماره را می‌گیریم تا بتوانیم نامِ دفترچهٔ تلفن را به کاربری که
+     * پلتفرم پیدا می‌کند گره بزنیم. فقط برای شماره‌هایی که نام دارند.
+     */
+    const nameByHash = {};
+    const named = entries.filter(c => c.name);
+    const seenTel = new Set();
+    const jobs = [];
+    for (const c of named) {
+        if (seenTel.has(c.tel)) continue;
+        seenTel.add(c.tel);
+        jobs.push(
+            apiFetch('/phone_hash', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: c.tel })
+            }).then(r => r.json()).then(h => {
+                if (h && h.hash && !nameByHash[h.hash]) nameByHash[h.hash] = c.name;
+            }).catch(() => {})
+        );
+    }
+    await Promise.all(jobs);
+
     const res = await apiFetch('/contacts_lookup', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hashes: list.map(c => c.tel).filter(Boolean) })
+        body: JSON.stringify({ hashes: entries.map(c => c.tel) })
     }).then(r => r.json());
-    const found = res.matches || [];
+    const found = (res.matches || []).map(u => Object.assign({}, u, { local_name: nameByHash[u.hash] || '' }));
+    saveImportedContacts(found);
     if (!found.length) {
         box.innerHTML = `<div class="cc-hint">هیچ‌کدام از این ${fa(res.checked || list.length)} شماره روی پلتفرم نیستند.
             <br>به دوستانت بگو شماره‌شان را اینجا ثبت کنند.</div>`;
@@ -3191,8 +3429,8 @@ async function lookupPhones(list) {
         <div class="contact-row">
             ${avatarHTML(u, 38)}
             <div class="cr-tx">
-                <div class="cr-name">${esc(u.full_name || u.username)}</div>
-                <div class="cr-sub">@${esc(u.username)} · ${u.is_online ? 'آنلاین' : 'آفلاین'}</div>
+                <div class="cr-name">${esc(u.local_name || u.full_name || u.username)}</div>
+                <div class="cr-sub">@${esc(u.username)} · ${u.is_online ? 'آنلاین' : 'آفلاین'}${u.local_name && u.full_name && u.local_name !== u.full_name ? ' · در پلتفرم: ' + esc(u.full_name) : ''}</div>
             </div>
             <button class="icon-btn sm" title="گفتگو" onclick="openChatWith(${u.id})">
                 <svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
