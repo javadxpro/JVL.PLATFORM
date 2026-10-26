@@ -69,6 +69,16 @@
         appVersion: '4.0.0',
         appName: 'Volexturn',
         storyTtlHours: 24,
+        /*
+         * ضربان حضور و مهلت تازگی.
+         *
+         * چرا لازم است: clientId هر بار تصادفی است و keepalive ۳۰ ثانیه، پس بعد از
+         * رفرشِ صفحه بروکر تا ~۴۵ ثانیه بعد نشستِ مردهٔ قبلی را می‌بیند و Last Will
+         * او را — که {online:false} و retained است — روی *همان* تاپیک presence/<uid>
+         * می‌گذارد. بدون ضربان، کاربرِ وصل برای همیشه آفلاین نشان داده می‌شد.
+         */
+        presenceBeat: 25000,
+        presenceTtl: 90000,
         mediaLimit: MEDIA_LIMIT, streamLimit: STREAM_LIMIT, chunkText: CHUNK_TEXT
     };
 
@@ -200,7 +210,7 @@
                     ready = true;
                     willUserId = u ? u.id : null;
                     connecting = null;
-                    if (u) publishPresence(true);
+                    if (u) { publishPresence(true); startPresenceBeat(); }
                     while (pending.length) { const f = pending.shift(); try { f(); } catch { /* ignore */ } }
                     fireState('connected', {});
                     resolve();
@@ -267,21 +277,66 @@
 
     let lastPresenceAt = 0;
 
-    function publishPresence(online) {
+    function publishPresence(online, force) {
         const u = me();
         if (!u) return;
-        /* اگر همین حالا آنلاین اعلام شده، دوباره نویز نفرست */
+        /* اگر همین حالا آنلاین اعلام شده، دوباره نویز نفرست (ضربان force می‌فرستد) */
         const topic = `${P()}/presence/${u.id}`;
         const cur = cache.get(topic);
-        if (online && cur && cur.online && Date.now() - lastPresenceAt < 20000) return;
+        if (!force && online && cur && cur.online && Date.now() - lastPresenceAt < 20000) return;
         lastPresenceAt = Date.now();
-        publish(topic, { online: !!online, at: now(), id: u.id, name: u.full_name, username: u.username });
+        /*
+         * ts مهر زمانی عددی است (میلی‌ثانیهٔ epoch). عمداً از `at` برای سنجش تازگی
+         * استفاده نمی‌کنیم: آن رشتهٔ «yyyy-MM-dd HH:mm:ss» بدون منطقهٔ زمانی است و
+         * دو مرورگر در دو منطقهٔ زمانی آن را جور دیگری می‌خوانند.
+         */
+        publish(topic, { online: !!online, at: now(), ts: Date.now(), id: u.id, name: u.full_name, username: u.username });
     }
 
     const isOnline = uid => {
         const d = getDoc(`presence/${uid}`);
-        return !!(d && d.online);
+        if (!d || !d.online) return false;
+        /* کلاینت قدیمی بدون ts → به همان online اکتفا کن */
+        if (typeof d.ts !== 'number') return true;
+        /*
+         * حضورِ کهنه آنلاین شمرده نمی‌شود: اگر مرورگر بدون Last Will درست بمیرد
+         * (قطع برق، کشته‌شدن پروسه) تاپیک online:true می‌ماند و تا ابد آنلاین
+         * نشان داده می‌شد.
+         */
+        return Date.now() - d.ts < (Config.presenceTtl || 90000);
     };
+
+    /*
+     * فهرست آنلاین‌ها را حساب کن و *فقط اگر عوض شده بود* به صفحه خبر بده.
+     * این نگهبان جلوی حلقهٔ بازخورد را می‌گیرد: اگر هر بار که حضور خودمان را
+     * دوباره منتشر می‌کنیم user_status بدهیم، صفحه loadUsers() می‌زند و دور
+     * می‌افتد.
+     */
+    function refreshOnlineState() {
+        const online = allUsers().filter(u => isOnline(u.id)).map(u => u.id).sort((a, b) => a - b);
+        const key = online.join(',');
+        if (key !== lastOnlineKey) { lastOnlineKey = key; socketEmit('user_status', { online }); }
+    }
+
+    /* ── ضربان حضور: خودترمیمی بعد از Last Will کهنه یا پاک‌شدن تاپیک ── */
+    let beatTimer = null;
+    function startPresenceBeat() {
+        if (beatTimer) return;
+        beatTimer = setInterval(() => {
+            if (!ready || !me()) return;
+            publishPresence(true, true);
+            /*
+             * آفلاین‌شدن بر اثر کهنه‌شدنِ حضور هیچ تاپیکی منتشر نمی‌کند، پس بدون
+             * این فراخوانی، کاربرِ مرده تا تغییر بعدیِ حضور در UI آنلاین می‌ماند.
+             */
+            refreshOnlineState();
+        }, Config.presenceBeat || 25000);
+        /* در نود پروسه را زنده نگه ندارد تا تست‌ها تمام شوند */
+        if (beatTimer.unref) beatTimer.unref();
+    }
+    function stopPresenceBeat() {
+        if (beatTimer) { clearInterval(beatTimer); beatTimer = null; }
+    }
 
     /* ───────── رویدادهای زنده (جایگزین Socket.IO) ───────── */
 
@@ -1910,11 +1965,11 @@
          * باشد، وگرنه هر بار که حضور خودمان را دوباره منتشر می‌کنیم صفحه
          * loadUsers() می‌زند و حلقهٔ بازخورد درست می‌شود.
          */
-        if (t.startsWith(`${P()}/presence/`)) {
-            const online = allUsers().filter(u => isOnline(u.id)).map(u => u.id).sort((a, b) => a - b);
-            const key = online.join(',');
-            if (key !== lastOnlineKey) { lastOnlineKey = key; socketEmit('user_status', { online }); }
-        }
+        /*
+         * حضور: «user_status» را فقط وقتی بده که فهرست آنلاین‌ها واقعاً عوض شده
+         * باشد (نگهبان داخل refreshOnlineState).
+         */
+        if (t.startsWith(`${P()}/presence/`)) refreshOnlineState();
         else if (t.startsWith(`${P()}/group/`) || t.startsWith(`${P()}/member/`)) socketEmit('groups_changed', {});
     });
 
@@ -1928,6 +1983,7 @@
         /** بستن کامل اتصال (برای تست و خاموش‌کردن صفحه) */
         shutdown() {
             ready = false; willUserId = null; connecting = null;
+            stopPresenceBeat();
             if (client) { try { client.end(true); } catch { /* ignore */ } client = null; }
         },
         reconnect() {

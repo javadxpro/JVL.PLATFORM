@@ -844,3 +844,24 @@ test('PWA: مانیفست و service worker معتبر هستند', () => {
     new (require('node:vm').Script)(fs.readFileSync(path.join(ROOT, 'sw.js'), 'utf8'));
     assert.match(fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8'), /rel="manifest"/);
 });
+
+test('شمارندهٔ «آنلاین» در نوار بالا صفر نمی‌ماند', async () => {
+    /*
+     * همین عدد همان چیزی است که کاربر می‌بیند. حضور در حالت MQTT با تاپیک
+     * retained presence/<uid> سنجیده می‌شود و Last Willِ نشست‌های مرده می‌تواند
+     * آن را آفلاین بگذارد؛ ضربان حضور باید جلویش را بگیرد.
+     */
+    const [a, b] = await twoLoggedIn('brz-online', ['parsa', 'roja']);
+    /* رقم فارسی را به لاتین برمی‌گردانیم تا به شکل قلم وابسته نباشیم */
+    const readCount = pg => Number(pg.win.document.getElementById('onlineCount')
+        .textContent.replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d)));
+
+    await waitFor(() => readCount(a) === 2, 20000, 'شمارندهٔ پارسا باید ۲ شود (خودش + رها)');
+    await waitFor(() => readCount(b) === 2, 20000, 'شمارندهٔ رها باید ۲ شود');
+
+    /* هیچ‌کس نباید خودش را آفلاین ببیند */
+    const me = await a.win.fetch('/users').then(r => r.json());
+    const self = me.find(u => u.id === a.win.document.body.dataset.userId * 1) || null;
+    assert.ok(me.some(u => u.is_online), 'حداقل یک کاربر باید آنلاین گزارش شود');
+    assert.ok(self === null || self.is_online !== false, 'کاربر نباید خودش را آفلاین ببیند');
+});

@@ -43,6 +43,7 @@ function loadClient(name) {
     const T = mod.__test;
     T.Config.broker = brokerUrl;
     T.Config.networkKey = NETWORK;
+    T.Config.presenceBeat = 400;   /* در تولید ۲۵ ثانیه؛ اینجا سریع تا تست طول نکشد */
     const api = {
         name,
         mod,
@@ -427,6 +428,74 @@ test('وضعیت بن در شکل کاربر دیده می‌شود و رفع ب
     const fresh = loadClient('bob4');
     await waitFor(() => !!fresh.T.getDoc('uname/bob'), 'رسیدن uname/bob به کلاینت تازه');
     assert.equal((await fresh.post('/login', { username: 'bob', password: 'newpass1' })).status, 200);
+});
+
+/* ───────── حضور و ارادهٔ کهنه ───────── */
+
+test('ارادهٔ کهنهٔ نشست قبلی نباید کاربرِ وصل را آفلاین نشان دهد', async () => {
+    const bobId = bob.T.allUsers().find(u => u.username === 'bob').id;
+    /*
+     * آزمون قبلی (بن/رفع‌بن) تاپیک presence بابک را پاک کرد و بابک همچنان وصل است.
+     * همین انتظار، ترمیمِ خودکار را ثابت می‌کند — پیش از ضربان اینجا برای همیشه
+     * آفلاین می‌ماند.
+     */
+    await waitFor(() => bob.T.isOnline(bobId), 'بازگشت بابک به آنلاین بعد از رفع بن');
+
+    /*
+     * شبیه‌سازی رفرش صفحه: نشست تازه وصل شد و online:true داد. حدود ۴۵ ثانیه
+     * بعد (۱٫۵ × keepalive) بروکر نشستِ مردهٔ قبلی را می‌بیند و ارادهٔ او را که
+     * {online:false} و retained است روی *همان* تاپیک presence/<uid> منتشر می‌کند.
+     * clientId هر بار تصادفی است، پس این دو نشست از نظر بروکر یکی نیستند.
+     */
+    bob.T.publish(`${bob.T.P()}/presence/${bobId}`,
+        { online: false, at: bob.T.now(), id: bobId }, { retain: true });
+    await waitFor(() => bob.T.getDoc(`presence/${bobId}`).online === false, 'رسیدن ارادهٔ کهنه');
+    assert.equal(bob.T.isOnline(bobId), false, 'پیش از اصلاح، اینجا برای همیشه آفلاین می‌ماند');
+
+    /* کاربر هنوز وصل است؛ ضربان حضور باید خودش را ترمیم کند */
+    await waitFor(() => bob.T.isOnline(bobId) === true, 'بازگشت وضعیت آنلاین با ضربان حضور');
+
+    /* و در کش کلاینت دیگر هم باید درست دیده شود */
+    await waitFor(() => alice.T.isOnline(bobId) === true, 'ترمیم حضور در دید آلیس');
+});
+
+test('نشست مرده نباید تا ابد آنلاین بماند', async () => {
+    const dead = loadClient('deaduser');
+    await dead.post('/register', { username: 'deaduser', password: 'pass1234' });
+    /* dead.login (نه dead.post) هویت را در localStorage می‌گذارد — بدون آن me()
+       خالی است و Last Will و حضورِ درستی ساخته نمی‌شود */
+    const r = await dead.login('deaduser', 'pass1234');
+    const id = r.body.user.id;
+    /*
+     * هویت بعد از پاسخِ ورود در localStorage می‌نشیند، پس اتصالِ همان لحظه هنوز
+     * Last Will درستی نداشت. یک درخواست دیگر باعث می‌شود connect() تفاوت هویت را
+     * ببیند و با هویت درست وصل شود — همان کاری که صفحه با connectSocket می‌کند.
+     */
+    await dead.get('/users');
+    await waitFor(() => alice.T.isOnline(id), 'آنلاین‌شدن کاربر تازه');
+
+    /*
+     * مرورگر بدون ارادهٔ درست بسته شده (قطع برق، کشته‌شدن پروسه).
+     * آخرین حضورِ مانده online:true است؛ فقط ts دارد کهنه می‌شود.
+     */
+    const cur = dead.T.getDoc(`presence/${id}`);
+    dead.T.publish(`${dead.T.P()}/presence/${id}`,
+        Object.assign({}, cur, { ts: Date.now() - (dead.T.Config.presenceTtl || 90000) - 5000 }),
+        { retain: true });
+    /* گوش‌دادن به رویدادی که UI با آن شمارهٔ آنلاین را تازه می‌کند */
+    const seen = [];
+    const sock = alice.T.makeSocket();
+    sock.on('user_status', d => seen.push(d));
+
+    await waitFor(() => alice.T.getDoc(`presence/${id}`).ts !== cur.ts, 'رسیدن حضور کهنه');
+    assert.equal(alice.T.isOnline(id), false, 'حضور کهنه نباید آنلاین شمرده شود');
+
+    /* آفلاین‌شدنِ بی‌اراده هیچ تاپیکی منتشر نمی‌کند؛ ضربان باید خبر بدهد */
+    await waitFor(() => seen.length > 0, 'خبر user_status برای آفلاین‌شدن بر اثر کهنه‌شدن');
+    assert.equal(seen[seen.length - 1].online.includes(id), false,
+        'کاربر مرده نباید در فهرست آنلاینِ UI بماند');
+
+    dead.mod.shutdown();
 });
 
 test.after(async () => {
