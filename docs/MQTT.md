@@ -57,7 +57,7 @@
 | `evt/dm/<uid>` | `msg` · `edit` · `delete` · `seen` · `pin` · `typing` · `clear` |
 | `evt/group/<gid>` | همان‌ها برای گفتگوی گروهی |
 | `evt/notify/<uid>` | اعلان لایک/کامنت/فالو |
-| `evt/voice/<room>` | سیگنال WebRTC (offer/answer/ICE) |
+| `evt/voice/<room>` | سیگنال WebRTC (offer/answer/ICE) + پیام‌های اتاق (`hello`/`here`/`bye`/`mute`) |
 | `evt/global` | `post_like` · `post_comment` · `post_view` · `follow_update` · `groups_changed` · `post_deleted` · `message_deleted` |
 
 هر کلاینت یک‌بار `jvl/<key>/v1/#` را subscribe می‌کند؛ هم state از retainedها
@@ -192,6 +192,17 @@ git push origin arena/ac24cb6b-jvl-platform
 
 اگر خواستی روی `main` منتشر شود، منبع Pages را در
 `Settings → Pages → Source` به `main / (root)` تغییر بده.
+
+## اتاق صوتی روی MQTT
+
+اتاق‌ها **هیچ وضعیت retained ندارند**. نام اتاق همان کلید است: هرکس
+`join_voice` را با نام یکسان بفرستد، هم‌اتاقی می‌شود. فهرست حاضران با
+دست‌دادنِ `hello`/`here` روی همان `evt/voice/<room>` ساخته می‌شود و با تپشِ
+۸ ثانیه زنده می‌ماند؛ عضو بی‌خبر پس از ۲۵ ثانیه حذف می‌شود.
+
+`evt/voice/<room>` فقط به اعضای همان اتاق تحویل می‌شود (مجموعهٔ `voiceRooms`).
+پیش از این، `voiceRooms` پر می‌شد ولی هیچ‌جا خوانده نمی‌شد و سیگنال یک اتاق به
+همهٔ اتاق‌های دیگر هم می‌رفت.
 
 ## تماس (WebRTC یک‌به‌یک)
 

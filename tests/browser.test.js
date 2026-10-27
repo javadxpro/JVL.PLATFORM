@@ -865,3 +865,66 @@ test('شمارندهٔ «آنلاین» در نوار بالا صفر نمی‌�
     assert.ok(me.some(u => u.is_online), 'حداقل یک کاربر باید آنلاین گزارش شود');
     assert.ok(self === null || self.is_online !== false, 'کاربر نباید خودش را آفلاین ببیند');
 });
+
+/* ───────── گفتگوی صوتی ───────── */
+
+/** اتصال به اتاق صوتی با میکروفون ساختگی */
+async function joinVoice(pg, room, log) {
+    installMockRTC(pg.win, log || []);
+    pg.win.document.getElementById('voiceRoomInput').value = room;
+    pg.win.toggleVoiceConnect();
+}
+const voiceRows = pg => pg.win.document.querySelectorAll('#voicePeersList .peer-row').length;
+
+test('اتاق صوتی: عضویت، فهرست حاضران و بی‌صداکردن', async () => {
+    const [a] = await twoLoggedIn('brz-vc1', ['shayan']);
+    await joinVoice(a, 'اتاق تست');
+    await waitFor(() => voiceRows(a) === 1, 8000, 'خودِ کاربر باید در فهرست باشد');
+    assert.match(a.win.document.getElementById('voicePeersList').textContent, /\(تو\)/);
+    assert.match(a.win.document.getElementById('voicePeersTitle').textContent, /اتاق تست/,
+        'عنوان باید نام اتاق را نشان دهد');
+    assert.notEqual(a.win.document.getElementById('voiceMuteBtn').style.display, 'none',
+        'دکمهٔ بی‌صدا باید بعد از اتصال دیده شود');
+
+    a.win.toggleVoiceMute();
+    assert.match(a.win.document.getElementById('voiceMuteBtn').textContent, /روشن کردن/);
+    assert.equal(a.win.document.getElementById('vdot-self').textContent, '🔇',
+        'نشانگر خودِ کاربر باید بی‌صدا شود');
+
+    a.win.toggleVoiceMute();
+    assert.equal(a.win.document.getElementById('vdot-self').textContent, '·');
+});
+
+test('دو هم‌اتاقی همدیگر را می‌بینند و دقیقاً یک طرف پیشنهاد می‌دهد', async () => {
+    const [a, b] = await twoLoggedIn('brz-vc2', ['amin', 'bahar']);
+    const logA = [], logB = [];
+    await joinVoice(a, 'دوستان', logA);
+    await settle(500);
+    await joinVoice(b, 'دوستان', logB);
+
+    await waitFor(() => voiceRows(a) === 2 && voiceRows(b) === 2, 12000,
+        'هر دو باید همدیگر را در فهرست ببینند');
+
+    /*
+     * در Mesh اگر هر دو طرف هم‌زمان پیشنهاد بدهند glare می‌شود. قانون ما این است
+     * که فقط شناسهٔ کوچک‌تر پیشنهاد بدهد، پس در کل اتاق باید دقیقاً یک offer باشد.
+     */
+    const both = () => logA.concat(logB);
+    /* فهرست حاضران با hello/here پر می‌شود و از مذاکره جلوتر است؛ باید صبر کرد */
+    await waitFor(() => both().filter(x => x === 'setLocal:answer').length === 1, 12000,
+        'طرفِ گیرنده باید پاسخ بسازد');
+    assert.equal(both().filter(x => x === 'setLocal:offer').length, 1,
+        'دقیقاً یک طرف باید پیشنهاد بدهد (وگرنه glare)');
+});
+
+test('اتاق‌های جدا از هم قاطی نمی‌شوند', async () => {
+    const [a, b] = await twoLoggedIn('brz-vc3', ['omid', 'paria']);
+    await joinVoice(a, 'اتاق الف');
+    await settle(500);
+    await joinVoice(b, 'اتاق ب');
+
+    /* اگر جداسازی اتاق کار نکند، این دو همدیگر را می‌بینند */
+    await settle(2500);
+    assert.equal(voiceRows(a), 1, 'اتاق الف باید فقط عضو خودش را ببیند');
+    assert.equal(voiceRows(b), 1, 'اتاق ب باید فقط عضو خودش را ببیند');
+});

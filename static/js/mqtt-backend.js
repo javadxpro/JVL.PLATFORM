@@ -366,7 +366,14 @@
         } else if (tail.startsWith('voice/')) {
             /* سیگنال خودمان را به خودمان برنمی‌گردانیم (مثل socket.to در سرور) */
             if (event.sender === myId) return;
-            socketEmit('voice_signal', { room: tail.slice(6), sender: event.sender, signal: event.signal || {} });
+            const room = tail.slice(6);
+            /*
+             * فقط به اعضای همان اتاق. voiceRooms از قبل پر می‌شد ولی هیچ‌جا
+             * خوانده نمی‌شد، پس سیگنال یک اتاق به همهٔ اتاق‌های دیگر هم می‌رفت
+             * و فهرست حاضران قاطی می‌شد.
+             */
+            if (!voiceRooms.has(room)) return;
+            socketEmit('voice_signal', { room, sender: event.sender, signal: event.signal || {} });
         } else if (tail === 'global') {
             socketEmit(event.t, event.data);
         }

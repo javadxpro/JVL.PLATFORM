@@ -804,16 +804,28 @@ svg.ic { flex-shrink:0; }
                         <div class="voice-orb" id="voiceOrb">
                             <svg class="ic" width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
                         </div>
-                        <h2 style="font-size:18px; font-weight:900;">اتاق گفتگوی زنده</h2>
-                        <p style="font-size:12px; color:var(--text-2); margin-top:6px; line-height:2;">وصل شو و با بقیه‌ی اعضای آنلاین شبکه، زنده و صوتی حرف بزن.</p>
+                        <h2 style="font-size:18px; font-weight:900;">اتاق گفتگوی صوتی</h2>
+                        <p style="font-size:12px; color:var(--text-2); margin-top:6px; line-height:2;">نام اتاق را بنویس و وصل شو. هرکس همان نام را بزند، هم‌اتاقیِ تو است.</p>
                         <div class="eq" id="voiceEq"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
-                        <div style="max-width:270px; margin:14px auto 0;">
+                        <div style="max-width:290px; margin:12px auto 0; display:flex; flex-direction:column; gap:8px;">
+                            <input type="text" id="voiceRoomInput" maxlength="32" placeholder="نام اتاق، مثلاً «دوستان»" dir="rtl" style="padding:9px 12px; border-radius:var(--r-md); border:1px solid var(--border); background:var(--surface-2); color:var(--text); font-family:inherit; font-size:12.5px;">
                             <button class="btn" id="voiceConnectBtn" onclick="toggleVoiceConnect()">
                                 <svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-                                اتصال به ویس‌چت
+                                اتصال به اتاق
+                            </button>
+                            <button class="btn btn-ghost" id="voiceMuteBtn" onclick="toggleVoiceMute()" style="display:none;">
+                                🎙️ بی‌صدا کردن میکروفون
                             </button>
                         </div>
-                        <div class="voice-note">اتصال P2P رمزنگاری‌شده WebRTC</div>
+                        <div id="voiceDevices" style="display:none; max-width:290px; margin:10px auto 0; flex-direction:column; gap:7px; text-align:right;">
+                            <label style="font-size:11px; color:var(--text-3); display:block;">میکروفون
+                                <select id="voiceMicSel" onchange="onMicDeviceChange()" style="width:100%; margin-top:3px; padding:7px 9px; border-radius:var(--r-md); border:1px solid var(--border); background:var(--surface-2); color:var(--text); font-family:inherit; font-size:11.5px;"></select>
+                            </label>
+                            <label style="font-size:11px; color:var(--text-3); display:block;">بلندگو / هدفون
+                                <select id="voiceSpkSel" onchange="onSpeakerDeviceChange()" style="width:100%; margin-top:3px; padding:7px 9px; border-radius:var(--r-md); border:1px solid var(--border); background:var(--surface-2); color:var(--text); font-family:inherit; font-size:11.5px;"></select>
+                            </label>
+                        </div>
+                        <div class="voice-note">P2P رمزنگاری‌شدهٔ WebRTC · Mesh، بدون سرور رسانه</div>
                         <div class="mic-hint" id="micHint">
                             🎤 <b>میکروفون کار نمی‌کند؟</b><br>
                             مرورگرها فقط در حالت <b>localhost</b> یا <b>HTTPS</b> اجازه میکروفون می‌دهند.<br>
@@ -823,7 +835,7 @@ svg.ic { flex-shrink:0; }
                         </div>
                     </div>
                     <div class="voice-peers">
-                        <h4>افراد آنلاین در شبکه</h4>
+                        <h4 id="voicePeersTitle">حاضران در اتاق</h4>
                         <div id="voicePeersList"></div>
                     </div>
                 </div>
@@ -1591,19 +1603,52 @@ function connectSocket() {
     socket.on('post_view', (d) => updatePostCounts(d.post_id, { views: d.views }));
     socket.on('follow_update', (d) => { if (d.target_id == profileModalUserId) openProfileModal(d.target_id); });
     socket.on('voice_signal', async (data) => {
-        const { sender, signal } = data;
+        const sender = Number(data.sender);
+        const signal = data.signal || {};
+        if (!currentUser || sender === Number(currentUser.id)) return;
+        /* لایهٔ دفاعی: اگر رله اشتباهاً پیام اتاق دیگری را رساند، نادیده بگیر */
+        if (data.room && String(data.room) !== String(voiceRoomName())) return;
+
+        /* ── پیام‌های مدیریتی اتاق: به همهٔ اتاق می‌روند، نه یک نفر ── */
+        if (signal.t === 'hello' || signal.t === 'here') {
+            if (!localStream) return;
+            const known = voiceRoster.has(sender);
+            rosterTouch(sender, signal.name, signal.muted);
+            if (signal.t === 'hello') voiceSend({ t: 'here', name: currentUser.full_name, muted: voiceMuted });
+            /*
+             * برای هم‌اتاقیِ تازه مذاکره را شروع کن. قانون: شناسهٔ کوچک‌تر پیشنهاد
+             * می‌دهد، پس هیچ‌وقت دو طرف هم‌زمان offer نمی‌دهند. `!known` جلوِ
+             * ساختِ پیشنهادِ دوباره در هر تپش را می‌گیرد.
+             */
+            if (!known && Number(currentUser.id) < sender) voiceOffer(sender);
+            return;
+        }
+        if (signal.t === 'bye') {
+            voiceRoster.delete(sender); dropPeer(sender); renderVoicePeers(); return;
+        }
+        if (signal.t === 'mute') {
+            const p = voiceRoster.get(sender);
+            if (p) { p.muted = !!signal.muted; paintVoiceDot(sender); }
+            return;
+        }
+
         if (!localStream) return;
-        if (!peerConnections[sender]) createPeerConnection(sender);
+        /* رله به کل اتاق می‌فرستد؛ سیگنال WebRTC فقط به گیرندهٔ خودش مربوط است */
+        if (signal.to && Number(signal.to) !== Number(currentUser.id)) return;
         try {
             if (signal.sdp) {
-                await peerConnections[sender].setRemoteDescription(new RTCSessionDescription(signal.sdp));
+                if (!peerConnections[sender]) createPeerConnection(sender);
+                const pc = peerConnections[sender];
+                /* آبجکت ساده کافی است (مثل مسیر تماس یک‌به‌یک)؛ پوشش
+                   RTCSessionDescription میراث قدیمی است و لازم نیست */
+                await pc.setRemoteDescription(signal.sdp);
                 if (signal.sdp.type === 'offer') {
-                    const answer = await peerConnections[sender].createAnswer();
-                    await peerConnections[sender].setLocalDescription(answer);
-                    socket.emit('voice_signal', { room:'global_voice', sender: currentUser.id, signal:{ sdp: answer } });
+                    const answer = await pc.createAnswer();
+                    await pc.setLocalDescription(answer);
+                    voiceSendTo(sender, { sdp: pc.localDescription });
                 }
             } else if (signal.candidate) {
-                await peerConnections[sender].addIceCandidate(new RTCIceCandidate(signal.candidate));
+                if (peerConnections[sender]) await peerConnections[sender].addIceCandidate(signal.candidate);
             }
         } catch(e) { console.warn('voice signal error', e); }
     });
@@ -2210,53 +2255,314 @@ function deleteGroup(gid) {
     });
 }
 
-/* ═══════════ ویس‌چت زنده ═══════════ */
+/* ═══════════ گفتگوی صوتی (Mesh، سبک) ═══════════ */
+/*
+ * مقیاس هدف حدود ۶ نفر است، پس Mesh: یک RTCPeerConnection به ازای هر هم‌اتاقی.
+ * عمداً هیچ وضعیتِ سمت سروری برای اتاق‌ها ساخته نشده — رلهٔ سیگنال همین حالا
+ * نام اتاق را پارامتر می‌گیرد، و فهرست حاضران با یک دست‌دادنِ hello/here روی
+ * همان کانال سیگنال ساخته می‌شود. یعنی اتاق‌های متعدد بدون یک خط تغییر در
+ * سرور یا شیم MQTT.
+ */
+const VOICE_BEAT_MS = 8000;     /* تپشِ اعلام حضور */
+const VOICE_PEER_TTL = 25000;   /* بیش از این بی‌خبر بماند، رفته حساب می‌شود */
+
+let voiceRoster = new Map();    /* uid → {name, at, muted} */
+let voiceMuted = false;
+let voiceBeatTimer = null;
+let voiceMeterTimer = null;
+let voiceCtx = null;
+let micAnalyser = null, micData = null;
+const peerAudio = new Map();    /* uid → {el, analyser, data, talking} */
+
+function voiceRoomName() {
+    const el = document.getElementById('voiceRoomInput');
+    const raw = String((el && el.value) || localStorage.getItem('jvl_voice_room') || 'اتاق اصلی').trim();
+    return raw || 'اتاق اصلی';
+}
+
+/** سیگنال/پیام برای همهٔ اتاق */
+function voiceSend(payload) {
+    if (!socket || !currentUser) return;
+    socket.emit('voice_signal', { room: voiceRoomName(), sender: currentUser.id, signal: payload });
+}
+/** سیگنال فقط برای یک هم‌اتاقی (رله به کل اتاق می‌فرستد، پس گیرنده باید فیلتر کند) */
+function voiceSendTo(uid, payload) { voiceSend(Object.assign({ to: uid }, payload)); }
+
+function voiceAudioCtx() {
+    if (voiceCtx) return voiceCtx;
+    const C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return null;
+    try { voiceCtx = new C(); } catch { voiceCtx = null; }
+    return voiceCtx;
+}
+
+function voiceAnnounce(kind) {
+    voiceSend({ t: kind || 'hello', name: currentUser.full_name, muted: voiceMuted });
+}
+
+function rosterTouch(uid, name, muted) {
+    const prev = voiceRoster.get(uid);
+    voiceRoster.set(uid, {
+        name: name || (prev && prev.name) || ('کاربر ' + uid),
+        at: Date.now(),
+        muted: typeof muted === 'boolean' ? muted : !!(prev && prev.muted)
+    });
+    renderVoicePeers();
+}
+
+function rosterPrune() {
+    const t = Date.now();
+    let changed = false;
+    for (const uid of [...voiceRoster.keys()]) {
+        const p = voiceRoster.get(uid);
+        if (t - p.at > VOICE_PEER_TTL) { voiceRoster.delete(uid); dropPeer(uid); changed = true; }
+    }
+    if (changed) renderVoicePeers();
+}
+
+function voiceUserObj(uid, name) {
+    return allUsersCache.find(u => u.id == uid) || { id: uid, full_name: name, avatar: null, username: '' };
+}
+
 function renderVoicePeers() {
     const box = document.getElementById('voicePeersList');
     if (!box) return;
-    const online = allUsersCache.filter(u => u.is_online);
-    if (!online.length) {
-        box.innerHTML = '<div style="font-size:12px; color:var(--text-3); padding:7px 4px;">کسی جز تو آنلاین نیست — از دستگاه دیگه وصل شو 🙂</div>';
+    const title = document.getElementById('voicePeersTitle');
+    const live = !!localStream;
+    if (title) title.textContent = live ? `حاضران در «${voiceRoomName()}»` : 'حاضران در اتاق';
+    if (!live) {
+        box.innerHTML = '<div style="font-size:12px; color:var(--text-3); padding:7px 4px;">اول به اتاق وصل شو تا حاضران را ببینی.</div>';
         return;
     }
-    box.innerHTML = online.map(u => `
-        <div class="peer-row">${avatarHTML(u, 30)} ${esc(u.full_name)} <span style="font-size:10px; color:var(--success); margin-right:auto;">● آنلاین</span></div>
-    `).join('');
+    const row = (uid, u, isMe) => `
+        <div class="peer-row" id="vrow-${uid}">
+            ${avatarHTML(u, 30)}
+            <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                ${esc(u.full_name)}${isMe ? ' <span style="font-size:10px; color:var(--text-3);">(تو)</span>' : ''}
+            </span>
+            <span class="vdot" id="vdot-${uid}" style="font-size:12px;">·</span>
+        </div>`;
+    let html = row('self', voiceUserObj(currentUser.id, currentUser.full_name), true);
+    for (const [uid, p] of voiceRoster) html += row(uid, voiceUserObj(uid, p.name), false);
+    box.innerHTML = html;
+    /* وضعیت صحبت/بی‌صدا بعد از هر رندر دوباره رنگ شود */
+    paintVoiceDot('self');
+    for (const uid of voiceRoster.keys()) paintVoiceDot(uid);
 }
+
+function paintVoiceDot(uid) {
+    const el = document.getElementById('vdot-' + uid);
+    if (!el) return;
+    const muted = uid === 'self' ? voiceMuted : !!(voiceRoster.get(uid) && voiceRoster.get(uid).muted);
+    const talking = uid === 'self' ? selfTalking : !!(peerAudio.get(uid) && peerAudio.get(uid).talking);
+    if (muted) { el.textContent = '🔇'; el.style.color = 'var(--text-3)'; }
+    else if (talking) { el.textContent = '🎙️'; el.style.color = 'var(--success)'; }
+    else { el.textContent = '·'; el.style.color = 'var(--text-3)'; }
+}
+
+let selfTalking = false;
+
+function startVoiceMeter() {
+    if (voiceMeterTimer) return;
+    /* به‌جای requestAnimationFrame از تایمر ۱۶۰ms استفاده می‌کنیم: برای نشانگر
+       «کی داره حرف می‌زنه» کاملاً کافی است و خیلی سبک‌تر. */
+    voiceMeterTimer = setInterval(() => {
+        const level = a => {
+            if (!a || !a.analyser) return 0;
+            a.analyser.getByteFrequencyData(a.data);
+            let sum = 0;
+            for (let i = 0; i < a.data.length; i++) sum += a.data[i];
+            return sum / a.data.length;
+        };
+        const meNow = level({ analyser: micAnalyser, data: micData }) > 8;
+        if (meNow !== selfTalking) { selfTalking = meNow; paintVoiceDot('self'); }
+        for (const [uid, p] of peerAudio) {
+            const t = level(p) > 8;
+            if (t !== p.talking) { p.talking = t; paintVoiceDot(uid); }
+        }
+    }, 160);
+}
+
+function stopVoiceMeter() {
+    if (voiceMeterTimer) { clearInterval(voiceMeterTimer); voiceMeterTimer = null; }
+}
+
+function attachAnalyser(stream) {
+    const ctx = voiceAudioCtx();
+    if (!ctx) return { analyser: null, data: null };
+    try {
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 512;
+        ctx.createMediaStreamSource(stream).connect(analyser);
+        return { analyser, data: new Uint8Array(analyser.frequencyBinCount) };
+    } catch { return { analyser: null, data: null }; }
+}
+
+function dropPeer(uid) {
+    const pc = peerConnections[uid];
+    if (pc) { try { pc.close(); } catch { /* ignore */ } delete peerConnections[uid]; }
+    const p = peerAudio.get(uid);
+    if (p) { try { p.el.srcObject = null; } catch { /* ignore */ } peerAudio.delete(uid); }
+}
+
+function voiceTeardown() {
+    voiceSend({ t: 'bye' });
+    if (socket) socket.emit('leave_voice', { room: voiceRoomName(), user_id: currentUser.id });
+    for (const uid of Object.keys(peerConnections)) dropPeer(uid);
+    if (localStream) { localStream.getTracks().forEach(t => { try { t.stop(); } catch { /* ignore */ } }); localStream = null; }
+    voiceRoster.clear();
+    if (voiceBeatTimer) { clearInterval(voiceBeatTimer); voiceBeatTimer = null; }
+    stopVoiceMeter();
+    micAnalyser = null; micData = null; selfTalking = false;
+}
+
+/* با بسته‌شدن صفحه از اتاق خارج شو، وگرنه بقیه تا مهلتِ تپش معطل می‌مانند */
+window.addEventListener('pagehide', () => { if (localStream) voiceTeardown(); });
+
+function voiceMicConstraints() {
+    const c = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+    const saved = localStorage.getItem('jvl_voice_mic');
+    if (saved) c.deviceId = { exact: saved };
+    return { audio: c };
+}
+
 async function toggleVoiceConnect() {
     const btn = document.getElementById('voiceConnectBtn');
     const orb = document.getElementById('voiceOrb');
     const eq = document.getElementById('voiceEq');
+    const muteBtn = document.getElementById('voiceMuteBtn');
+    const devs = document.getElementById('voiceDevices');
     if (localStream) {
-        localStream.getTracks().forEach(t => t.stop());
-        Object.values(peerConnections).forEach(pc => pc.close());
-        peerConnections = {};
-        localStream = null;
-        socket.emit('leave_voice', { room:'global_voice', user_id: currentUser.id });
+        voiceTeardown();
         orb.classList.remove('live'); eq.classList.remove('on');
-        btn.innerHTML = '<svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg> اتصال به ویس‌چت';
-        toast('اتصال ویس‌چت قطع شد', 'info');
-    } else {
-        try {
-            localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            socket.emit('join_voice', { room:'global_voice', user_id: currentUser.id });
-            orb.classList.add('live'); eq.classList.add('on');
-            btn.innerHTML = '<svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="23" y1="1" x2="1" y2="23"/></svg> قطع اتصال';
-            toast('به ویس‌چت وصل شدی 🎙️', 'success');
-        } catch(e) { micFail(e); }
+        btn.textContent = 'اتصال به اتاق';
+        if (muteBtn) muteBtn.style.display = 'none';
+        if (devs) devs.style.display = 'none';
+        toast('از اتاق خارج شدی', 'info');
+        renderVoicePeers();
+        return;
     }
+    const room = voiceRoomName();
+    localStorage.setItem('jvl_voice_room', room);
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia(voiceMicConstraints());
+    } catch (e) { micFail(e); return; }
+    voiceMuted = false;
+    const m = attachAnalyser(localStream);
+    micAnalyser = m.analyser; micData = m.data;
+    socket.emit('join_voice', { room, user_id: currentUser.id });
+    orb.classList.add('live'); eq.classList.add('on');
+    btn.textContent = 'قطع اتصال و خروج';
+    if (muteBtn) { muteBtn.style.display = ''; muteBtn.textContent = '🎙️ بی‌صدا کردن میکروفون'; }
+    voiceAnnounce('hello');
+    /* اعلام حضور دوره‌ای: هم فهرست بقیه تازه می‌ماند، هم عضو مرده حذف می‌شود */
+    if (!voiceBeatTimer) voiceBeatTimer = setInterval(() => { voiceAnnounce('hello'); rosterPrune(); }, VOICE_BEAT_MS);
+    startVoiceMeter();
+    renderVoicePeers();
+    loadVoiceDevices();
+    toast(`به «${room}» وصل شدی 🎙️`, 'success');
 }
-function createPeerConnection(sender) {
-    const pc = new RTCPeerConnection({ iceServers: [{ urls:'stun:stun.l.google.com:19302' }] });
-    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-    pc.onicecandidate = e => {
-        if (e.candidate) socket.emit('voice_signal', { room:'global_voice', sender: currentUser.id, signal:{ candidate: e.candidate } });
+
+function toggleVoiceMute() {
+    if (!localStream) return;
+    voiceMuted = !voiceMuted;
+    localStream.getAudioTracks().forEach(t => { t.enabled = !voiceMuted; });
+    const btn = document.getElementById('voiceMuteBtn');
+    if (btn) btn.textContent = voiceMuted ? '🔇 روشن کردن میکروفون' : '🎙️ بی‌صدا کردن میکروفون';
+    voiceSend({ t: 'mute', muted: voiceMuted, name: currentUser.full_name });
+    paintVoiceDot('self');
+}
+
+/* ── انتخاب ورودی/خروجی صدا ── */
+async function loadVoiceDevices() {
+    const devs = document.getElementById('voiceDevices');
+    if (!devs || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+    let list = [];
+    try { list = await navigator.mediaDevices.enumerateDevices(); } catch { return; }
+    const fill = (sel, items, savedId) => {
+        if (!sel) return;
+        sel.innerHTML = items.map((d, i) =>
+            `<option value="${esc(d.deviceId)}"${d.deviceId === savedId ? ' selected' : ''}>${esc(d.label || (i === 0 ? 'پیش‌فرض' : 'دستگاه ' + (i + 1)))}</option>`).join('');
+        if (!items.length) sel.innerHTML = '<option value="">—</option>';
     };
+    fill(document.getElementById('voiceMicSel'), list.filter(d => d.kind === 'audioinput'), localStorage.getItem('jvl_voice_mic'));
+    fill(document.getElementById('voiceSpkSel'), list.filter(d => d.kind === 'audiooutput'), localStorage.getItem('jvl_voice_spk'));
+    devs.style.display = 'flex';
+}
+
+async function onMicDeviceChange() {
+    const sel = document.getElementById('voiceMicSel');
+    if (!sel || !sel.value || !localStream) return;
+    localStorage.setItem('jvl_voice_mic', sel.value);
+    let fresh;
+    try { fresh = await navigator.mediaDevices.getUserMedia(voiceMicConstraints()); }
+    catch (e) { micFail(e); return; }
+    const track = fresh.getAudioTracks()[0];
+    /* جای‌گزینی بی‌قطع: renegotiation لازم نیست */
+    for (const pc of Object.values(peerConnections)) {
+        const snd = pc.getSenders().find(s => s.track && s.track.kind === 'audio');
+        if (snd && snd.replaceTrack) { try { await snd.replaceTrack(track); } catch { /* ignore */ } }
+    }
+    localStream.getAudioTracks().forEach(t => { try { t.stop(); } catch { /* ignore */ } });
+    localStream.getAudioTracks().forEach(t => localStream.removeTrack(t));
+    localStream.addTrack(track);
+    const m = attachAnalyser(localStream);
+    micAnalyser = m.analyser; micData = m.data;
+    toast('میکروفون عوض شد', 'success');
+}
+
+async function onSpeakerDeviceChange() {
+    const sel = document.getElementById('voiceSpkSel');
+    if (!sel || !sel.value) return;
+    localStorage.setItem('jvl_voice_spk', sel.value);
+    for (const p of peerAudio.values()) await applySpeakerDevice(p.el);
+    toast('خروجی صدا عوض شد', 'success');
+}
+
+async function applySpeakerDevice(el) {
+    const id = localStorage.getItem('jvl_voice_spk');
+    /* setSinkId فقط در بعضی مرورگرها هست؛ نبودنش خطا نیست */
+    if (id && el && typeof el.setSinkId === 'function') { try { await el.setSinkId(id); } catch { /* ignore */ } }
+}
+
+/*
+ * چه کسی offer می‌دهد؟ در Mesh اگر هر دو طرف هم‌زمان offer بدهند glare می‌شود.
+ * قانون سبک و قطعی: هرکس شناسه‌اش کوچک‌تر است پیشنهاد می‌دهد.
+ */
+async function voiceOffer(uid) {
+    try {
+        const pc = peerConnections[uid] || createPeerConnection(uid);
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        voiceSendTo(uid, { sdp: pc.localDescription });
+    } catch (e) { console.warn('ساخت پیشنهاد ناموفق بود', e); }
+}
+
+function createPeerConnection(sender) {
+    /* قبلاً فقط یک STUN داشت؛ iceConfig() سه STUN و TURN اختیاری می‌دهد */
+    const pc = new RTCPeerConnection(iceConfig());
+    if (localStream) localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    pc.onicecandidate = e => { if (e.candidate) voiceSendTo(sender, { candidate: e.candidate }); };
     pc.ontrack = e => {
-        const audio = new Audio();
-        audio.srcObject = e.streams[0];
-        audio.autoplay = true;
-        audio.play().catch(() => {});
+        const stream = e.streams[0];
+        if (!stream) return;
+        const el = document.createElement('audio');
+        el.autoplay = true;
+        el.srcObject = stream;
+        applySpeakerDevice(el);
+        /* play() در بعضی محیط‌ها Promise برنمی‌گرداند؛ بی‌محابا .catch نزن */
+        const pr = el.play();
+        if (pr && typeof pr.catch === 'function') pr.catch(() => {});
+        const a = attachAnalyser(stream);
+        peerAudio.set(sender, { el, analyser: a.analyser, data: a.data, talking: false });
+        startVoiceMeter();
+    };
+    /* اتصال مجدد خودکار: اگر ICE شکست خورد، یک‌بار از نو مذاکره می‌کنیم */
+    pc.onconnectionstatechange = () => {
+        if (pc.connectionState !== 'failed' || !localStream || pc.__retried) return;
+        pc.__retried = true;
+        dropPeer(sender);
+        if (voiceRoster.has(sender) && Number(currentUser.id) < Number(sender)) voiceOffer(sender);
     };
     peerConnections[sender] = pc;
     return pc;
@@ -2968,7 +3274,11 @@ function switchTab(tab, el) {
     if (tab === 'explore') loadExplore();
     if (tab === 'lan') loadLanHosts();
     if (tab === 'admin') { loadAdminStats(); loadBannedIps(); }
-    if (tab === 'voice') renderVoicePeers();
+    if (tab === 'voice') {
+        const ri = document.getElementById('voiceRoomInput');
+        if (ri && !ri.value) ri.value = localStorage.getItem('jvl_voice_room') || 'اتاق اصلی';
+        renderVoicePeers();
+    }
     if (tab === 'chat') { loadUsers(); loadGroups(); }
     if (tab === 'profile') refreshNotifUI();
 }
