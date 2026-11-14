@@ -19,6 +19,7 @@ const groupRoutes = require('./routes/groups');
 const socialRoutes = require('./routes/social');
 const lanRoutes = require('./routes/lan');
 const channelRoutes = require('./routes/channels');
+const eventRoutes = require('./routes/events');
 const pushRoutes = require('./routes/push');
 const profileRoutes = require('./routes/profile');
 const adminRoutes = require('./routes/admin');
@@ -75,6 +76,7 @@ function createApp(options = {}) {
     app.use(socialRoutes);
     app.use(lanRoutes);
     app.use(channelRoutes);
+    app.use(eventRoutes);
     app.use(pushRoutes);
     app.use(profileRoutes);
     app.use('/api/admin', adminRoutes);

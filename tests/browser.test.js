@@ -928,3 +928,37 @@ test('اتاق‌های جدا از هم قاطی نمی‌شوند', async () =
     assert.equal(voiceRows(a), 1, 'اتاق الف باید فقط عضو خودش را ببیند');
     assert.equal(voiceRows(b), 1, 'اتاق ب باید فقط عضو خودش را ببیند');
 });
+
+test('رویدادها در اکسپلور: ساخت، فهرست و پاسخ', async () => {
+    const [a, b] = await twoLoggedIn('brz-ev', ['tara', 'yara']);
+    const p = x => String(x).padStart(2, '0');
+    const d = new Date(Date.now() + 86400e3);          /* فردا */
+    const at = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+
+    /* دقیقاً همان کاری که کاربر با مودال می‌کند */
+    a.win.document.getElementById('evTitle').value = 'فوتبال کوچه ابوذَر';
+    a.win.document.getElementById('evStartsAt').value = at;
+    a.win.document.getElementById('evPlace').value = 'کوچهٔ پشت مدرسه';
+    a.win.submitEvent();
+
+    await waitFor(() => a.win.document.getElementById('eventsList').textContent.includes('فوتبال کوچه ابوذَر'),
+        12000, 'رویداد باید در فهرست بیاید');
+    assert.match(a.win.document.getElementById('eventsList').textContent, /کوچهٔ پشت مدرسه/,
+        'مکان باید نشان داده شود');
+
+    const list = await a.win.fetch('/events').then(r => r.json());
+    const ev = list.find(e => e.title === 'فوتبال کوچه ابوذَر');
+    assert.ok(ev, 'رویداد باید از API هم دیده شود');
+
+    /* کاربر دوم می‌آید */
+    b.win.rsvpEvent(ev.id, 'going');
+    await waitFor(async () => {
+        const l = await a.win.fetch('/events').then(r => r.json());
+        const e = l.find(x => x.id === ev.id);
+        return e && e.going_count === 1;
+    }, 12000, 'شمار «می‌آیند» باید یکی شود');
+
+    a.win.loadEvents();
+    await waitFor(() => /۱ می‌آیند/.test(a.win.document.getElementById('eventsList').textContent),
+        12000, 'شمارش باید در UI دیده شود');
+});

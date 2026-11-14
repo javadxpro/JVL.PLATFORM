@@ -224,6 +224,27 @@ CREATE TABLE IF NOT EXISTS channel_comments (
     content     TEXT    NOT NULL,
     created_at  TEXT    NOT NULL
 );
+
+/* ── رویدادها (بخش «کشف رویدادها» در نقشه‌راه) ── */
+
+CREATE TABLE IF NOT EXISTS events (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    title       TEXT    NOT NULL,
+    description TEXT    DEFAULT '',
+    place       TEXT    DEFAULT '',
+    starts_at   TEXT    NOT NULL,
+    host_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    is_public   INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS event_rsvps (
+    event_id    INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status      TEXT    NOT NULL DEFAULT 'going',
+    created_at  TEXT    NOT NULL,
+    PRIMARY KEY (event_id, user_id)
+);
 `;
 
 /* ───────── ابزار زمان ───────── */

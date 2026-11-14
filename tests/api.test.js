@@ -553,4 +553,115 @@ test('حذف گروه', async () => {
     assert.equal((await alice.get('/my_groups')).body.length, 0);
 });
 
+/* ───────── رویدادها ───────── */
+
+const evPad = x => String(x).padStart(2, '0');
+const evAt = ms => {
+    const d = new Date(Date.now() + ms);
+    return `${d.getFullYear()}-${evPad(d.getMonth() + 1)}-${evPad(d.getDate())} ` +
+        `${evPad(d.getHours())}:${evPad(d.getMinutes())}:00`;
+};
+let evId;
+/* توجه: eve را تست «حذف کاربر» پیش از این حذف کرده، پس کاربر تازه می‌سازیم */
+let zed;
+
+test('ساخت رویداد: اعتبارسنجی عنوان و زمان', async () => {
+    zed = srv.client();
+    await zed.register('zed', 'pass1234');
+    await zed.login('zed', 'pass1234');
+    assert.equal((await alice.post('/create_event', { title: '', starts_at: evAt(3600e3) })).status, 400,
+        'رویداد بدون عنوان باید رد شود');
+    assert.equal((await alice.post('/create_event', { title: 'بی‌زمان', starts_at: 'not-a-date' })).status, 400,
+        'زمان نامعتبر باید رد شود');
+    assert.equal((await alice.post('/create_event', { title: 'بی‌زمان', starts_at: '2030-13-45 99:99' })).status, 400,
+        'ماه/روز/ساعت خارج از بازه باید رد شود');
+
+    /* قالبِ ورودی datetime-local (با T و بدون ثانیه) هم باید پذیرفته شود */
+    const local = evAt(3600e3).replace(' ', 'T').slice(0, 16);
+    const r = await alice.post('/create_event', { title: 'فوتبال کوچه ابوذَر', starts_at: local, place: 'کوچهٔ پشت مدرسه' });
+    assert.equal(r.body.success, true, JSON.stringify(r.body));
+    evId = r.body.event.id;
+    assert.match(r.body.event.starts_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:00$/,
+        'زمان باید به قالب بقیهٔ کدبیس نرمال شود');
+    assert.ok(r.body.event.host_name, 'نام میزبان باید بیاید');
+    assert.equal(r.body.event.going_count, 0);
+    assert.equal(r.body.event.my_rsvp, null);
+});
+
+test('فهرست رویدادها: آینده اول، گذشته ته فهرست', async () => {
+    await alice.post('/create_event', { title: 'رویداد قدیمی', starts_at: evAt(-86400e3) });
+    const list = await alice.get('/events');
+    assert.equal(list.status, 200);
+    assert.ok(list.body.length >= 2);
+    assert.equal(list.body[0].is_past, false, 'اولین مورد باید آینده باشد');
+    assert.equal(list.body[list.body.length - 1].is_past, true, 'آخرین مورد باید گذشته باشد');
+    const mine = list.body.find(e => e.id === evId);
+    assert.ok(mine, 'رویداد ساخته‌شده باید در فهرست باشد');
+    assert.equal(mine.title, 'فوتبال کوچه ابوذَر');
+    assert.equal(mine.place, 'کوچهٔ پشت مدرسه');
+});
+
+test('پاسخ به رویداد: می‌آیم، شاید، انصراف', async () => {
+    let r = await bob.post(`/event_rsvp/${evId}`, { status: 'going' });
+    assert.equal(r.body.success, true);
+    assert.equal(r.body.event.going_count, 1);
+    assert.equal(r.body.event.my_rsvp, 'going');
+
+    r = await zed.post(`/event_rsvp/${evId}`, { status: 'maybe' });
+    assert.equal(r.body.event.maybe_count, 1);
+    assert.equal(r.body.event.going_count, 1, 'شاید نباید جای می‌آیم را بگیرد');
+
+    /* عوض‌کردن نظر: از maybe به going */
+    r = await zed.post(`/event_rsvp/${evId}`, { status: 'going' });
+    assert.equal(r.body.event.going_count, 2);
+    assert.equal(r.body.event.maybe_count, 0);
+
+    /* انصراف: ردیف پاک می‌شود، نه اینکه «نمی‌آیم» ثبت شود */
+    r = await zed.post(`/event_rsvp/${evId}`, { status: '' });
+    assert.equal(r.body.event.going_count, 1);
+    assert.equal(r.body.event.my_rsvp, null);
+
+    assert.equal((await bob.post(`/event_rsvp/${evId}`, { status: 'بلکه' })).status, 400,
+        'وضعیت نامعتبر باید رد شود');
+
+    const who = await bob.get(`/event_rsvps/${evId}`);
+    assert.equal(who.body.length, 1);
+    assert.equal(who.body[0].rsvp, 'going');
+    assert.equal(who.body[0].username, 'bob');
+});
+
+test('رویدادِ تمام‌شده جواب نمی‌گیرد', async () => {
+    const list = await alice.get('/events');
+    const old = list.body.find(e => e.is_past);
+    assert.ok(old, 'یک رویداد گذشته لازم است');
+    const r = await bob.post(`/event_rsvp/${old.id}`, { status: 'going' });
+    assert.equal(r.status, 400);
+    assert.match(r.body.message, /تمام شده/);
+});
+
+test('رویداد خصوصی برای بقیه دیده نمی‌شود', async () => {
+    const made = await alice.post('/create_event', {
+        title: 'جلسهٔ خصوصی', starts_at: evAt(7200e3), is_public: false
+    });
+    assert.equal(made.body.event.is_public, false);
+    const pid = made.body.event.id;
+
+    const list = await bob.get('/events');
+    assert.ok(!list.body.some(e => e.id === pid), 'رویداد خصوصی نباید در فهرست بقیه باشد');
+    assert.equal((await bob.get(`/event/${pid}`)).status, 403);
+    assert.equal((await alice.get(`/event/${pid}`)).status, 200, 'میزبان باید ببیند');
+});
+
+test('حذف رویداد فقط برای میزبان یا مدیر', async () => {
+    const made = await bob.post('/create_event', { title: 'رویداد بابک', starts_at: evAt(5400e3) });
+    const bid = made.body.event.id;
+    assert.equal((await zed.del(`/event/${bid}`)).status, 403, 'غریبه نباید بتواند حذف کند');
+    assert.equal((await bob.del(`/event/${bid}`)).body.success, true, 'میزبان باید بتواند');
+    assert.equal((await bob.del(`/event/${bid}`)).status, 404, 'دوبار حذف نباید ممکن باشد');
+
+    /* حذف رویداد، پاسخ‌هایش را هم می‌برد (ON DELETE CASCADE) */
+    assert.equal((await alice.del(`/event/${evId}`)).body.success, true, 'مدیر هم باید بتواند');
+    assert.equal((await alice.get(`/event_rsvps/${evId}`)).status, 404);
+});
+
 test.after(async () => { if (srv) await srv.close(); });

@@ -8,7 +8,7 @@
  * service worker کاربران همان فایل‌های کش‌شده را سرو می‌کند و اصلاحات هرگز به
  * دستشان نمی‌رسد. activate همهٔ کش‌های با نام دیگر را پاک می‌کند.
  */
-const CACHE = 'volexturn-shell-v4';
+const CACHE = 'volexturn-shell-v5';
 const SHELL = [
     './',
     './index.html',

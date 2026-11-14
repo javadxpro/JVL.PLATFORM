@@ -498,6 +498,85 @@ test('نشست مرده نباید تا ابد آنلاین بماند', async (
     dead.mod.shutdown();
 });
 
+/* ───────── رویدادها ───────── */
+
+const evP = x => String(x).padStart(2, '0');
+const evAt = ms => {
+    const d = new Date(Date.now() + ms);
+    return `${d.getFullYear()}-${evP(d.getMonth() + 1)}-${evP(d.getDate())} ` +
+        `${evP(d.getHours())}:${evP(d.getMinutes())}:00`;
+};
+
+test('رویدادها روی MQTT مثل سمت سرور کار می‌کنند', async () => {
+    /* اعتبارسنجی */
+    assert.equal((await alice.post('/create_event', { title: '', starts_at: evAt(3600e3) })).body.success, false);
+    assert.equal((await alice.post('/create_event', { title: 'بی‌زمان', starts_at: 'نه-تاریخ' })).body.success, false);
+
+    /* قالب datetime-local هم پذیرفته می‌شود */
+    const r = await alice.post('/create_event', {
+        title: 'فوتبال کوچه ابوذَر', starts_at: evAt(3600e3).replace(' ', 'T').slice(0, 16), place: 'کوچه'
+    });
+    assert.equal(r.body.success, true, JSON.stringify(r.body));
+    const eid = r.body.event.id;
+    assert.match(r.body.event.starts_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:00$/);
+    assert.ok(r.body.event.host_name, 'نام میزبان باید بیاید');  /* نام نمایشی را هاردکد نکن */
+
+    /* سند retained باید اول به کش هر کلاینت برسد */
+    await waitFor(() => !!bob.T.getDoc(`event/${eid}`), 'رسیدن رویداد به کش بابک');
+
+    /* بابک می‌آید، آلیس شاید — و شمارش‌ها قاطی نمی‌شوند */
+    const bobId = bob.T.allUsers().find(u => u.username === 'bob').id;
+    let x = await bob.post(`/event_rsvp/${eid}`, { status: 'going' });
+    assert.equal(x.body.event.going_count, 1);
+
+    /*
+     * شمارش‌ها در حالت MQTT از کش محلی هر کلاینت حساب می‌شوند، پس تا رسیدنِ
+     * سندِ retainedِ پاسخِ بابک به کشِ آلیس چند میلی‌ثانیه فاصله است. این ذاتِ
+     * طراحیِ بی‌سرور است، نه باگ — ولی تست باید صبر کند.
+     */
+    await waitFor(() => !!alice.T.getDoc(`ersvp/${eid}/${bobId}`), 'رسیدن پاسخ بابک به کش آلیس');
+
+    x = await alice.post(`/event_rsvp/${eid}`, { status: 'maybe' });
+    assert.equal(x.body.event.maybe_count, 1);
+    assert.equal(x.body.event.going_count, 1, 'شاید نباید جای می‌آیم را بگیرد');
+
+    /* انصراف ردیف را پاک می‌کند */
+    x = await bob.post(`/event_rsvp/${eid}`, { status: '' });
+    assert.equal(x.body.event.going_count, 0);
+    assert.equal(x.body.event.my_rsvp, null);
+
+    /* رویداد گذشته جواب نمی‌گیرد */
+    const old = await alice.post('/create_event', { title: 'قدیمی', starts_at: evAt(-86400e3) });
+    await waitFor(() => !!bob.T.getDoc(`event/${old.body.event.id}`), 'رسیدن رویداد قدیمی به کش بابک');
+    const past = await bob.post(`/event_rsvp/${old.body.event.id}`, { status: 'going' });
+    assert.equal(past.body.success, false);
+    assert.match(past.body.message, /تمام شده/);
+
+    /* فهرست: آینده اول، گذشته ته */
+    const list = await bob.get('/events');
+    assert.ok(Array.isArray(list.body) && list.body.length >= 2);
+    assert.equal(list.body[0].is_past, false);
+    assert.equal(list.body[list.body.length - 1].is_past, true);
+
+    /* حاضران: آلیس «شاید» دارد و بابک «می‌آیم» — پس دو نفر */
+    await bob.post(`/event_rsvp/${eid}`, { status: 'going' });
+    await waitFor(async () => (await alice.get(`/event_rsvps/${eid}`)).body.length === 2,
+        'هر دو پاسخ باید در فهرست حاضران باشد');
+    const who = await alice.get(`/event_rsvps/${eid}`);
+    const bobRow = who.body.find(u => u.username === 'bob');
+    assert.ok(bobRow, 'بابک باید در حاضران باشد');
+    assert.equal(bobRow.rsvp, 'going');
+    const aliceRow = who.body.find(u => u.username === 'alice');
+    assert.equal(aliceRow.rsvp, 'maybe');
+
+    /* حذف فقط برای میزبان یا مدیر */
+    assert.equal((await bob.del(`/event/${old.body.event.id}`)).body.success, false, 'غریبه نباید حذف کند');
+    assert.equal((await alice.del(`/event/${old.body.event.id}`)).body.success, true);
+    /* پاسخ‌ها هم با رویداد می‌روند */
+    await alice.del(`/event/${eid}`);
+    assert.equal((await alice.get(`/event/${eid}`)).status, 404);
+});
+
 test.after(async () => {
     /* کلاینت‌های MQTT را ببند، وگرنه reconnect باز می‌ماند و پروسه تمام نمی‌شود */
     for (const c of allClients) { try { c.mod.shutdown(); } catch { /* ignore */ } }

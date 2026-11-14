@@ -93,6 +93,27 @@
 | `POST /create_lan_host` | `{game_name, ip_address, port, description}` | `{success, id}` — IP یا نام میزبان اعتبارسنجی می‌شود |
 | `DELETE /delete_lan_host/:id` | — | `{success}` — سازنده یا مدیر |
 
+## رویدادها
+
+| مسیر | ورودی | خروجی |
+|---|---|---|
+| `POST /create_event` | `{title, starts_at, place?, description?, is_public?}` | `{success, event}` — `starts_at` هم `yyyy-MM-ddTHH:mm` و هم `yyyy-MM-dd HH:mm:ss` را می‌پذیرد و به قالب دوم نرمال می‌شود |
+| `GET /events` | — | `[event]` — آینده اول، گذشته ته فهرست؛ رویداد خصوصی فقط برای میزبان |
+| `GET /event/:id` | — | `event` یا ۴۰۴/۴۰۳ |
+| `GET /event_rsvps/:id` | — | `[user + rsvp + rsvp_at]` |
+| `POST /event_rsvp/:id` | `{status: "going"\|"maybe"\|""}` | `{success, event}` — رشتهٔ خالی یعنی انصراف و ردیف **پاک** می‌شود، نه «نمی‌آیم»؛ رویدادِ گذشته ۴۰۰ می‌دهد |
+| `DELETE /event/:id` | — | `{success}` — فقط میزبان یا مدیر؛ پاسخ‌ها هم با آن پاک می‌شوند |
+
+شکل `event`:
+
+```
+{ id, title, description, place, starts_at, host_id, host_name, is_public,
+  created_at, going_count, maybe_count, my_rsvp, is_past }
+```
+
+> زمان‌ها **محلی و بدون منطقهٔ زمانی** هستند، مثل بقیهٔ پلتفرم. قاطی‌کردن دو
+> قالب باعث می‌شد رویدادها بد مرتب شوند.
+
 ## ۸. پنل مدیر (`/api/admin/*` — فقط `role: "admin"`)
 
 | مسیر | پاسخ |
@@ -170,6 +191,7 @@ lan_host    { id, user_id, full_name, username, game_name, ip_address, port, des
 | `follow_update` | `{target_id, follower_id, following}` | تغییر وضعیت دنبال‌کردن |
 | `voice_signal` | `{room, sender, signal}` | رلهٔ سیگنال WebRTC |
 | `banned` | `{message, ip?}` | بن‌شدن حساب یا نشانی — بلافاصله بعدش اتصال قطع می‌شود و کلاینت نشست را پاک می‌کند |
+| `events_changed` | `{at}` یا `{event_id, at}` | ساخت/حذف رویداد یا تغییر پاسخ‌ها |
 
 > اتاق‌ها `user:<id>` و نام خام اتاق ویس هستند. رویدادهای مربوط به گروه به اتاق
 > `user:` همهٔ اعضا فرستاده می‌شوند، چون کلاینت هرگز عضو اتاق گروه نمی‌شود.

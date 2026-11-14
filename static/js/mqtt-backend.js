@@ -1561,6 +1561,122 @@
         return ok({ success: true, user: serializeUser({ ...doc, role: 'user' }) });
     });
 
+    /* ── رویدادها (کشف رویدادها) ──
+     * تاپیک‌های retained: event/<eid> و ersvp/<eid>/<uid>
+     * شکل پاسخ‌ها دقیقاً همان سمت سرور نود است.
+     */
+    function normalizeStartsAt(raw) {
+        const str = String(raw || '').trim().replace('T', ' ');
+        const m = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})(?::(\d{2}))?$/.exec(str);
+        if (!m) return null;
+        const [, y, mo, d, h, mi, se] = m;
+        if (!(+mo >= 1 && +mo <= 12 && +d >= 1 && +d <= 31 && +h <= 23 && +mi <= 59)) return null;
+        return `${y}-${mo}-${d} ${h}:${mi}:${se || '00'}`;
+    }
+    function allEvents() { return prefixDocs('event').map(d => d.value); }
+    function findEvent(id) { return getDoc(`event/${id}`) || null; }
+    function eventRsvps(eid) {
+        return prefixDocs('ersvp').filter(d => d.suffix.split('/')[0] === String(eid));
+    }
+    function serializeEvent(ev, selfId) {
+        const rs = eventRsvps(ev.id);
+        const mine = rs.find(d => d.suffix.split('/')[1] === String(selfId));
+        const host = findUser(ev.host_id);
+        return {
+            id: ev.id, title: ev.title, description: ev.description || '', place: ev.place || '',
+            starts_at: ev.starts_at, host_id: ev.host_id,
+            host_name: host ? (host.full_name || host.username) : '',
+            is_public: ev.is_public !== false, created_at: ev.created_at,
+            going_count: rs.filter(d => d.value.status === 'going').length,
+            maybe_count: rs.filter(d => d.value.status === 'maybe').length,
+            my_rsvp: mine ? mine.value.status : null,
+            is_past: ev.starts_at < now()
+        };
+    }
+    function eventsChanged(eid) {
+        broadcast('events_changed', { event_id: eid, at: now() });
+        socketEmit('events_changed', { event_id: eid, at: now() });
+    }
+
+    route('POST', '/create_event', async (p, body) => {
+        const e = needAuth(); if (e) return e;
+        const self = me();
+        const title = String((body && body.title) || '').trim().slice(0, 120);
+        if (!title) return err('عنوان رویداد لازم است');
+        const startsAt = normalizeStartsAt(body && body.starts_at);
+        if (!startsAt) return err('زمان شروع معتبر نیست');
+        const eid = newId();
+        const ev = {
+            id: eid, title,
+            description: String((body && body.description) || '').slice(0, 2000),
+            place: String((body && body.place) || '').slice(0, 200),
+            starts_at: startsAt, host_id: self.id,
+            is_public: !(body && body.is_public === false),
+            created_at: now()
+        };
+        publish(`${P()}/event/${eid}`, ev);
+        eventsChanged(eid);
+        return ok({ success: true, event: serializeEvent(ev, self.id) });
+    });
+
+    route('GET', '/events', async () => {
+        const e = needAuth(); if (e) return e;
+        const self = me();
+        const list = allEvents()
+            .filter(ev => ev.is_public !== false || ev.host_id === self.id)
+            .map(ev => serializeEvent(ev, self.id));
+        /* گذشته‌ها ته فهرست */
+        list.sort((a, b) => (a.is_past - b.is_past) || (a.starts_at < b.starts_at ? -1 : 1));
+        return ok(list);
+    });
+
+    route('GET', '/event/:id', async p => {
+        const e = needAuth(); if (e) return e;
+        const ev = findEvent(p.id);
+        if (!ev) return err('رویداد پیدا نشد', 404);
+        if (ev.is_public === false && ev.host_id !== me().id) return err('این رویداد خصوصی است', 403);
+        return ok(serializeEvent(ev, me().id));
+    });
+
+    route('GET', '/event_rsvps/:id', async p => {
+        const e = needAuth(); if (e) return e;
+        if (!findEvent(p.id)) return err('رویداد پیدا نشد', 404);
+        return ok(eventRsvps(p.id).map(d => {
+            const u = findUser(Number(d.suffix.split('/')[1]));
+            return u ? Object.assign({}, serializeUser(u), { rsvp: d.value.status, rsvp_at: d.value.at }) : null;
+        }).filter(Boolean));
+    });
+
+    route('POST', '/event_rsvp/:id', async (p, body) => {
+        const e = needAuth(); if (e) return e;
+        const self = me();
+        const ev = findEvent(p.id);
+        if (!ev) return err('رویداد پیدا نشد', 404);
+        if (ev.is_public === false && ev.host_id !== self.id) return err('این رویداد خصوصی است', 403);
+        if (ev.starts_at < now()) return err('این رویداد تمام شده است');
+        const status = String((body && body.status) || '').trim();
+        if (status && status !== 'going' && status !== 'maybe') return err('وضعیت نامعتبر است');
+        const topic = `${P()}/ersvp/${ev.id}/${self.id}`;
+        if (status) publish(topic, { status, at: now() });
+        else publish(topic, null);
+        eventsChanged(ev.id);
+        return ok({ success: true, event: serializeEvent(findEvent(ev.id), self.id) });
+    });
+
+    route('DELETE', '/event/:id', async p => {
+        const e = needAuth(); if (e) return e;
+        const self = me();
+        const ev = findEvent(p.id);
+        if (!ev) return err('رویداد پیدا نشد', 404);
+        if (ev.host_id !== self.id && self.role !== 'admin') {
+            return err('فقط میزبان یا مدیر می‌تواند رویداد را حذف کند', 403);
+        }
+        publish(`${P()}/event/${ev.id}`, null);
+        for (const d of eventRsvps(ev.id)) publish(`${P()}/ersvp/${ev.id}/${d.suffix.split('/')[1]}`, null);
+        eventsChanged(ev.id);
+        return ok({ success: true, message: 'رویداد حذف شد' });
+    });
+
     route('POST', '/api/admin/ban_user/:id', async (p, body) => {
         const e = adminGuard(); if (e) return e;
         const id = Number(p.id);

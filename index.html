@@ -761,6 +761,11 @@ svg.ic { flex-shrink:0; }
                 <div class="explore-wrap">
                     <div class="stories-bar" id="storiesBar"></div>
                     <div class="exp-head">
+                        <h3>📅 رویدادها</h3>
+                        <button class="btn btn-ghost" onclick="openNewEventModal()">+ رویداد جدید</button>
+                    </div>
+                    <div id="eventsList" style="margin-bottom:20px;"></div>
+                    <div class="exp-head">
                         <h3>پست‌ها و ویدیوها</h3>
                         <button class="btn btn-ghost" onclick="openNewPostModal()">
                             <svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -1069,6 +1074,31 @@ svg.ic { flex-shrink:0; }
         <input type="file" id="postFileInput" accept="image/*,video/*">
         <div class="m-actions">
             <button class="btn" onclick="submitPost()">انتشار</button>
+            <button class="btn btn-outline" onclick="closeModals()">انصراف</button>
+        </div>
+    </div>
+</div>
+
+<div class="modal" id="newEventModal">
+    <div class="modal-body">
+        <h3>📅 رویداد جدید</h3>
+        <div class="field">
+            <input type="text" id="evTitle" maxlength="120" placeholder="عنوان رویداد، مثلاً «فوتبال کوچه ابوذَر»">
+        </div>
+        <div class="field">
+            <input type="datetime-local" id="evStartsAt">
+        </div>
+        <div class="field">
+            <input type="text" id="evPlace" maxlength="200" placeholder="مکان (اختیاری)، مثلاً «کوچهٔ پشت مدرسه»">
+        </div>
+        <div class="field">
+            <textarea id="evDesc" rows="3" maxlength="2000" placeholder="توضیح (اختیاری)"></textarea>
+        </div>
+        <label style="display:flex; align-items:center; gap:7px; font-size:12px; color:var(--text-2); margin-bottom:10px;">
+            <input type="checkbox" id="evPublic" checked> همه بتوانند ببینند
+        </label>
+        <div class="m-actions">
+            <button class="btn" onclick="submitEvent()">ساخت رویداد</button>
             <button class="btn btn-outline" onclick="closeModals()">انصراف</button>
         </div>
     </div>
@@ -1527,6 +1557,10 @@ function connectSocket() {
     });
     socket.on('user_status', () => { loadUsers(); renderVoicePeers(); });
     socket.on('groups_changed', () => loadGroups());
+    socket.on('events_changed', () => {
+        /* فقط اگر تب اکسپلور باز است؛ وگرنه برای هر RSVP الکی درخواست می‌زنیم */
+        if (document.getElementById('exploreTab').style.display === 'block') loadEvents();
+    });
     /*
      * مدیر بنمان کرده: نشست را پاک می‌کنیم و به صفحهٔ ورود برمی‌گردیم.
      * بدون این، کاربرِ بن‌شده تا رفرش کردن فکر می‌کرد هنوز وصل است.
@@ -2569,6 +2603,131 @@ function createPeerConnection(sender) {
 }
 
 /* ═══════════ اکسپلور ═══════════ */
+/* ═══════════ رویدادها (کشف رویدادها) ═══════════ */
+let eventsCache = [];
+
+function loadEvents() {
+    const box = document.getElementById('eventsList');
+    if (!box) return;
+    apiFetch('/events').then(r => r.json()).then(list => {
+        eventsCache = Array.isArray(list) ? list : [];
+        renderEvents();
+    }).catch(() => { eventsCache = []; renderEvents(); });
+}
+
+/** «۲ ساعت دیگر» / «فردا ۱۸:۳۰» — چون زمانِ مطلق به‌تنهایی چیزی نمی‌گوید */
+function eventWhenLabel(startsAt, isPast) {
+    const t = new Date(String(startsAt).replace(' ', 'T')).getTime();
+    if (!Number.isFinite(t)) return startsAt;
+    const diff = t - Date.now();
+    const mins = Math.round(diff / 60000);
+    if (!isPast) {
+        if (mins < 60) return `${fa(Math.max(mins, 1))} دقیقه دیگر`;
+        if (mins < 60 * 24) return `${fa(Math.round(mins / 60))} ساعت دیگر`;
+        if (mins < 60 * 24 * 2) return `فردا ${faDateLabel(startsAt)}`;
+        if (mins < 60 * 24 * 7) return `${fa(Math.round(mins / 1440))} روز دیگر`;
+    }
+    return faDateLabel(startsAt);
+}
+
+function renderEvents() {
+    const box = document.getElementById('eventsList');
+    if (!box) return;
+    if (!eventsCache.length) {
+        box.innerHTML = '<div style="font-size:12px; color:var(--text-3); padding:10px 4px; line-height:2;">رویدادی نیست. اولین رویداد را تو بساز 🙂</div>';
+        return;
+    }
+    box.innerHTML = eventsCache.map(ev => {
+        const mine = ev.host_id == currentUser.id;
+        const going = ev.my_rsvp === 'going';
+        const maybe = ev.my_rsvp === 'maybe';
+        return `
+        <div class="admin-row" style="${ev.is_past ? 'opacity:.55;' : ''}">
+            <div style="min-width:0; flex:1;">
+                <div class="ar-name">${esc(ev.title)}${ev.is_public ? '' : ' <span style="font-size:10px; color:var(--text-3);">🔒 خصوصی</span>'}</div>
+                <div class="ar-sub" style="line-height:1.9;">
+                    ${ev.is_past ? 'برگزار شد · ' : ''}${esc(eventWhenLabel(ev.starts_at, ev.is_past))}
+                    ${ev.place ? ' · 📍 ' + esc(ev.place) : ''}
+                    <br>میزبان: ${esc(ev.host_name || '—')} · ${fa(ev.going_count)} می‌آیند${ev.maybe_count ? ' · ' + fa(ev.maybe_count) + ' شاید' : ''}
+                </div>
+            </div>
+            <div class="ar-actions" style="flex-direction:column; align-items:stretch; gap:5px;">
+                ${ev.is_past ? '' : `
+                    <div style="display:flex; gap:5px;">
+                        <button class="btn ${going ? '' : 'btn-ghost'}" style="padding:5px 10px; font-size:11px;" onclick="rsvpEvent(${ev.id}, '${going ? 'no' : 'going'}')">${going ? '✓ می‌آیم' : 'می‌آیم'}</button>
+                        <button class="btn ${maybe ? '' : 'btn-ghost'}" style="padding:5px 10px; font-size:11px;" onclick="rsvpEvent(${ev.id}, '${maybe ? 'no' : 'maybe'}')">${maybe ? '✓ شاید' : 'شاید'}</button>
+                    </div>`}
+                <div style="display:flex; gap:5px;">
+                    <button class="btn btn-ghost" style="padding:5px 10px; font-size:11px;" onclick="showEventRsvps(${ev.id})">حاضران</button>
+                    ${mine || currentUser.role === 'admin' ? `<button class="btn btn-ghost" style="padding:5px 10px; font-size:11px; color:var(--danger,#ef4444);" onclick="deleteEvent(${ev.id})">حذف</button>` : ''}
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function openNewEventModal() {
+    document.getElementById('evTitle').value = '';
+    document.getElementById('evPlace').value = '';
+    document.getElementById('evDesc').value = '';
+    document.getElementById('evPublic').checked = true;
+    /* یک ساعت از الان، گردِ رُند — چون ورودی خالی یعنی «الان»، که بی‌فایده است */
+    const d = new Date(Date.now() + 3600000);
+    d.setMinutes(0, 0, 0);
+    const p = x => String(x).padStart(2, '0');
+    document.getElementById('evStartsAt').value =
+        `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+    document.getElementById('newEventModal').classList.add('active');
+}
+
+function submitEvent() {
+    const title = document.getElementById('evTitle').value.trim();
+    if (!title) return toast('عنوان رویداد لازم است', 'error');
+    const startsAt = document.getElementById('evStartsAt').value;
+    if (!startsAt) return toast('زمان شروع را انتخاب کن', 'error');
+    apiFetch('/create_event', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            title, starts_at: startsAt,
+            place: document.getElementById('evPlace').value.trim(),
+            description: document.getElementById('evDesc').value.trim(),
+            is_public: document.getElementById('evPublic').checked
+        })
+    }).then(r => r.json()).then(res => {
+        if (!res.success) return toast(res.message || 'ساخت رویداد ناموفق بود', 'error');
+        closeModals(); toast('رویداد ساخته شد 📅', 'success'); loadEvents();
+    });
+}
+
+function rsvpEvent(id, status) {
+    apiFetch(`/event_rsvp/${id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: status === 'no' ? '' : status })
+    }).then(r => r.json()).then(res => {
+        if (!res.success) return toast(res.message || 'ناموفق', 'error');
+        loadEvents();
+    });
+}
+
+function deleteEvent(id) {
+    uiConfirm('این رویداد برای همیشه حذف می‌شود. مطمئنی؟', () => {
+        apiFetch(`/event/${id}`, { method: 'DELETE' }).then(r => r.json()).then(res => {
+            toast(res.message || (res.success ? 'رویداد حذف شد' : 'ناموفق'), res.success ? 'success' : 'error');
+            loadEvents();
+        });
+    });
+}
+
+function showEventRsvps(id) {
+    apiFetch(`/event_rsvps/${id}`).then(r => r.json()).then(rows => {
+        const list = Array.isArray(rows) ? rows : [];
+        const text = list.length
+            ? list.map(u => `${u.full_name || u.username} — ${u.rsvp === 'going' ? 'می‌آید' : 'شاید'}`).join('\n')
+            : 'هنوز کسی جواب نداده.';
+        toast(text, 'info');
+    });
+}
+
 function loadExplore() {
     apiFetch('/stories').then(r => r.json()).then(stories => {
         storyCache = stories;
@@ -3271,7 +3430,7 @@ function switchTab(tab, el) {
     const meta = TAB_META[tab] || { title: tab, sub: '' };
     document.getElementById('tbTitle').textContent = meta.title;
     document.getElementById('tbSub').textContent = meta.sub;
-    if (tab === 'explore') loadExplore();
+    if (tab === 'explore') { loadExplore(); loadEvents(); }
     if (tab === 'lan') loadLanHosts();
     if (tab === 'admin') { loadAdminStats(); loadBannedIps(); }
     if (tab === 'voice') {
