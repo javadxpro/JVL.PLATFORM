@@ -1,0 +1,8 @@
+node_modules/
+data/
+*.log
+.env
+.DS_Store
+
+# نقشه راه شخصی — ریپو عمومی است، این سند منتشر نشود
+docs/Roadmap.md

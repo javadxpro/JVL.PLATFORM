@@ -3,14 +3,22 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#6366f1">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
 <title>Volexturn v3.1 — شبکه محلی هوشمند</title>
-<script src="/static/js/socket.io.min.js"></script>
+<script src="static/js/mqtt.min.js"></script>
+<script src="static/js/mqtt-backend.js"></script>
 <style>
 /* ============ فونت لوکال ============ */
-@font-face { font-family:'Vazirmatn'; src:url('/static/fonts/Vazirmatn-Regular.woff2') format('woff2'); font-weight:400; font-display:swap; }
-@font-face { font-family:'Vazirmatn'; src:url('/static/fonts/Vazirmatn-Medium.woff2') format('woff2'); font-weight:500; font-display:swap; }
-@font-face { font-family:'Vazirmatn'; src:url('/static/fonts/Vazirmatn-Bold.woff2') format('woff2'); font-weight:700; font-display:swap; }
-@font-face { font-family:'Vazirmatn'; src:url('/static/fonts/Vazirmatn-Black.woff2') format('woff2'); font-weight:900; font-display:swap; }
+@font-face { font-family:'Vazirmatn'; src:url('static/fonts/Vazirmatn-Regular.woff2') format('woff2'); font-weight:400; font-display:swap; }
+@font-face { font-family:'Vazirmatn'; src:url('static/fonts/Vazirmatn-Medium.woff2') format('woff2'); font-weight:500; font-display:swap; }
+@font-face { font-family:'Vazirmatn'; src:url('static/fonts/Vazirmatn-Bold.woff2') format('woff2'); font-weight:700; font-display:swap; }
+@font-face { font-family:'Vazirmatn'; src:url('static/fonts/Vazirmatn-Black.woff2') format('woff2'); font-weight:900; font-display:swap; }
 
 :root {
     --primary: #6366f1; --primary-light: #818cf8; --primary-dark: #4f46e5;
@@ -100,27 +108,77 @@ svg.ic { flex-shrink:0; }
 
 /* ============ پوسته اپ (فشرده) ============ */
 .app-shell { position:fixed; inset:0; z-index:10; display:flex; }
-.sidenav { width:var(--nav-w); min-width:var(--nav-w); height:100%; padding:14px 12px; display:flex; flex-direction:column; gap:4px; background:var(--surface); backdrop-filter:blur(24px); -webkit-backdrop-filter:blur(24px); border-left:1px solid var(--border); z-index:20; }
-.sidenav .brand { display:flex; align-items:center; gap:10px; padding:2px 8px 12px; }
-.sidenav .brand .logo-mark { width:38px; height:38px; min-width:38px; background:var(--grad); border:none; box-shadow:var(--glow); }
-.sidenav .brand h1 { font-size:17px; font-weight:900; background:var(--grad); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
-.sidenav .brand small { display:block; font-size:9.5px; color:var(--text-3); -webkit-text-fill-color:var(--text-3); font-weight:400; }
 .nav-item { display:flex; align-items:center; gap:11px; padding:10px 13px; border-radius:var(--r-md); border:none; background:transparent; color:var(--text-2); font-family:inherit; font-size:13.5px; font-weight:500; cursor:pointer; transition:var(--tr); width:100%; text-align:right; position:relative; }
 .nav-item:hover { background:var(--surface-2); color:var(--text); }
 .nav-item.active { background:var(--grad-soft); color:var(--primary-light); font-weight:700; }
 .nav-item.active::before { content:''; position:absolute; right:-12px; top:22%; bottom:22%; width:4px; border-radius:4px; background:var(--grad); box-shadow:var(--glow); }
-.sidenav .spacer { flex:1; }
-.sidenav .nav-user { display:flex; align-items:center; gap:10px; padding:9px; border-radius:var(--r-md); background:var(--surface-2); border:1px solid var(--border); cursor:pointer; transition:var(--tr); }
-.sidenav .nav-user:hover { transform:translateY(-1px); box-shadow:var(--shadow-md); }
-.sidenav .nav-user .nu-name { font-size:12.5px; font-weight:700; line-height:1.3; }
-.sidenav .nav-user .nu-role { font-size:10px; color:var(--text-3); }
 
 .main-col { flex:1; display:flex; flex-direction:column; min-width:0; }
-.topbar { height:var(--topbar-h); min-height:var(--topbar-h); display:flex; align-items:center; gap:10px; padding:0 16px; border-bottom:1px solid var(--border); background:var(--surface); backdrop-filter:blur(24px); -webkit-backdrop-filter:blur(24px); z-index:15; }
+.topbar { min-height:var(--topbar-h); display:flex; align-items:center; gap:12px; padding:8px 16px; border-bottom:1px solid var(--border); background:var(--surface); backdrop-filter:blur(24px); -webkit-backdrop-filter:blur(24px); z-index:15; flex-wrap:wrap; }
+/* نوار بخش‌ها: همهٔ قسمت‌های پلتفرم، افقی و بالای صفحه */
+.tb-nav { display:flex; align-items:center; gap:5px; flex:1; min-width:0; overflow-x:auto; scrollbar-width:none; padding:2px 0; }
+.tb-nav::-webkit-scrollbar { display:none; }
+.tb-nav .nav-item { width:auto; flex:0 0 auto; white-space:nowrap; padding:8px 13px; font-size:13px; gap:7px; border-radius:999px; }
+.tb-nav .nav-item .ic { width:16px; height:16px; }
+.tb-nav .nav-item.active::before { right:10px; left:10px; top:auto; bottom:3px; width:auto; height:3px; }
+.tb-brand { display:flex; align-items:center; gap:9px; flex:0 0 auto; }
+.tb-brand h1 { font-size:16px; font-weight:900; background:var(--grad); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; line-height:1.1; }
+.tb-brand small { display:block; font-size:9.5px; color:var(--text-3); }
+.topbar .nav-user { display:flex; align-items:center; gap:8px; padding:5px 9px 5px 5px; border-radius:999px; background:var(--surface-2); border:1px solid var(--border); cursor:pointer; transition:var(--tr); }
+.topbar .nav-user:hover { box-shadow:var(--shadow-md); }
+.topbar .nav-user .nu-name { font-size:12px; font-weight:700; line-height:1.25; }
+.topbar .nav-user .nu-role { font-size:9.5px; color:var(--text-3); }
+/* پیشرفت ارسال/دریافت رسانهٔ تکه‌تکه */
+.media-pending { display:flex; align-items:center; gap:8px; padding:12px 14px; border-radius:var(--r-md); background:var(--surface-2); border:1px dashed var(--border-2); font-size:12.5px; color:var(--text-2); margin-top:6px; }
+.mp-spin { width:14px; height:14px; min-width:14px; border-radius:50%; border:2px solid var(--border-2); border-top-color:var(--primary-light); animation:spin .8s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+.xfer-pill { position:fixed; bottom:calc(18px + env(safe-area-inset-bottom)); left:50%; transform:translateX(-50%); z-index:1200; display:none; align-items:center; gap:10px; padding:9px 15px; border-radius:999px; background:var(--surface-solid); border:1px solid var(--border-2); box-shadow:var(--shadow-lg); font-size:12.5px; font-weight:600; }
+.xfer-pill.on { display:flex; }
+/* ───────── تماس WebRTC ───────── */
+.call-overlay { position:fixed; inset:0; z-index:2000; display:none; flex-direction:column; background:#070a12; color:#fff; }
+.call-overlay.on { display:flex; }
+.call-overlay video#remoteVideo { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; background:#070a12; }
+.call-overlay.audio-only video#remoteVideo { display:none; }
+.call-overlay video#localVideo { position:absolute; top:calc(14px + env(safe-area-inset-top)); left:14px; width:104px; height:150px; object-fit:cover; border-radius:14px; border:2px solid rgba(255,255,255,.25); background:#111; z-index:3; display:none; }
+.call-overlay.video-on video#localVideo { display:block; }
+.call-top { position:relative; z-index:2; margin-top:calc(48px + env(safe-area-inset-top)); text-align:center; padding:0 20px; }
+.call-top .avatar { width:96px; height:96px; margin:0 auto 14px; font-size:38px; border:3px solid rgba(255,255,255,.2); }
+.call-name { font-size:22px; font-weight:800; }
+.call-state { font-size:13px; opacity:.75; margin-top:6px; }
+.call-actions { position:relative; z-index:2; margin-top:auto; margin-bottom:calc(30px + env(safe-area-inset-bottom)); display:flex; justify-content:center; gap:14px; flex-wrap:wrap; padding:0 16px; }
+.call-btn { width:56px; height:56px; border-radius:50%; border:none; background:rgba(255,255,255,.14); color:#fff; display:flex; align-items:center; justify-content:center; cursor:pointer; backdrop-filter:blur(8px); transition:var(--tr); }
+.call-btn:active { transform:scale(.93); }
+.call-btn.off { background:rgba(255,255,255,.4); color:#0b0d14; }
+.call-btn.end { background:#ef4444; width:66px; height:66px; }
+.call-btn.accept { background:#10b981; width:66px; height:66px; }
+.call-incoming { position:fixed; inset:0; z-index:2100; display:none; align-items:center; justify-content:center; background:rgba(3,5,10,.72); backdrop-filter:blur(10px); }
+.call-incoming.on { display:flex; }
+.ci-box { width:min(340px, 92vw); background:var(--surface-solid); border:1px solid var(--border-2); border-radius:var(--r-lg); box-shadow:var(--shadow-lg); padding:26px 20px 22px; text-align:center; }
+.ci-box .avatar { width:78px; height:78px; margin:0 auto 12px; font-size:30px; }
+.ci-title { font-size:17px; font-weight:800; }
+.ci-sub { font-size:12.5px; color:var(--text-3); margin-top:4px; }
+.ci-actions { display:flex; justify-content:center; gap:26px; margin-top:22px; }
+/* ───────── همسان‌سازی مخاطبین ───────── */
+.contacts-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--r-lg); padding:16px; margin-top:14px; }
+.contacts-card h3 { font-size:14px; font-weight:800; margin-bottom:4px; display:flex; align-items:center; gap:7px; }
+.contacts-card .cc-hint { font-size:11.5px; color:var(--text-3); line-height:1.7; }
+.notif-row { display:flex; align-items:center; gap:8px; margin-top:11px; flex-wrap:wrap; }
+.notif-state { font-size:11.5px; font-weight:700; padding:4px 10px; border-radius:var(--r-full); background:var(--surface-2); color:var(--text-3); }
+.notif-state.on { background:rgba(16,185,129,.16); color:#34d399; }
+.notif-state.off { background:rgba(239,68,68,.14); color:#f87171; }
+.contact-row { display:flex; align-items:center; gap:10px; padding:9px 4px; border-bottom:1px solid var(--border); }
+.contact-row:last-child { border-bottom:none; }
+.contact-row .cr-tx { min-width:0; flex:1; }
+.contact-row .cr-name { font-size:13px; font-weight:700; }
+.contact-row .cr-sub { font-size:10.5px; color:var(--text-3); }
+.phone-input { display:flex; gap:8px; margin-top:10px; }
+.phone-input input { flex:1; }
+.xfer-pill .bar { width:88px; height:5px; border-radius:3px; background:var(--border-2); overflow:hidden; }
+.xfer-pill .bar i { display:block; height:100%; width:0%; background:var(--grad); transition:width .18s; }
 .topbar .logo-mark { width:32px; height:32px; min-width:32px; border-radius:10px; background:var(--grad); display:flex; align-items:center; justify-content:center; border:none; }
 .topbar .tb-title { font-size:15px; font-weight:800; line-height:1.2; }
 .topbar .tb-sub { font-size:10.5px; color:var(--text-3); }
-.topbar .tb-right { margin-right:auto; display:flex; align-items:center; gap:7px; }
+.topbar .tb-right { margin-right:auto; display:flex; align-items:center; gap:7px; flex:0 0 auto; }
 .online-pill { display:flex; align-items:center; gap:6px; font-size:11.5px; font-weight:600; color:var(--text-2); background:var(--surface); border:1px solid var(--border); border-radius:var(--r-full); padding:5px 11px; }
 .online-pill .pulse-dot { width:7px; height:7px; border-radius:50%; background:var(--success); box-shadow:0 0 0 0 rgba(16,185,129,.6); animation:pulse 2s infinite; }
 @keyframes pulse { 0% { box-shadow:0 0 0 0 rgba(16,185,129,.55);} 70% { box-shadow:0 0 0 7px rgba(16,185,129,0);} 100% { box-shadow:0 0 0 0 rgba(16,185,129,0);} }
@@ -204,7 +262,32 @@ svg.ic { flex-shrink:0; }
 .fwd-label { font-size:9.5px; opacity:.65; display:flex; align-items:center; gap:4px; margin-bottom:3px; }
 .msg-meta { display:flex; align-items:center; gap:5px; justify-content:flex-end; margin-top:2px; }
 .msg-meta .edited { font-size:9px; opacity:.6; }
+/* ── کانال ── */
+.channel-composer { display:flex; align-items:center; gap:6px; padding:8px 10px; border-top:1px solid var(--border); background:var(--surface-2); }
+.channel-composer input[type=text] { flex:1; padding:9px 13px; border-radius:var(--r-full); border:1px solid var(--border); background:var(--surface); color:var(--text); font-family:inherit; font-size:13px; }
+.ch-hero { text-align:center; padding:18px 14px 14px; border-bottom:1px solid var(--border); }
+.ch-hero-av { margin:0 auto 8px; }
+.ch-hero-name { font-size:15px; font-weight:800; }
+.ch-hero-bio { font-size:11.5px; color:var(--text-3); margin-top:3px; }
+.ch-hero-meta { font-size:11px; color:var(--text-3); margin-top:5px; }
+.ch-hero-act { display:flex; gap:7px; justify-content:center; margin-top:11px; }
+.cpost { padding:11px 13px; border-bottom:1px solid var(--border); }
+.cpost-head { display:flex; align-items:center; gap:7px; margin-bottom:5px; }
+.cpost-author { font-size:12.5px; font-weight:800; }
+.cpost-time { font-size:10.5px; color:var(--text-3); margin-right:auto; }
+.cpost-body { font-size:13px; line-height:1.75; white-space:pre-wrap; word-break:break-word; }
+.cpost-media img { max-width:100%; border-radius:var(--r-md); margin-top:7px; }
+.cpost-foot { display:flex; gap:12px; margin-top:7px; font-size:10.5px; color:var(--text-3); }
+.cpost-foot button { background:none; border:none; color:var(--text-3); cursor:pointer; font-size:10.5px; font-family:inherit; padding:0; }
+.cpost-foot button:hover { color:var(--primary-light); }
+.cpost-cmts { margin-top:7px; padding-right:9px; border-right:2px solid var(--border); display:none; }
+.cpost-cmts.open { display:block; }
+.cpost-cmt { font-size:11.5px; margin-bottom:4px; }
+.cpost-cmt b { color:var(--primary-light); }
+.cpost-cmt-in { display:flex; gap:5px; margin-top:5px; }
+.cpost-cmt-in input { flex:1; padding:5px 9px; border-radius:var(--r-full); border:1px solid var(--border); background:var(--surface); color:var(--text); font-family:inherit; font-size:11.5px; }
 .ticks { display:inline-flex; }
+.ticks.delivered { color:var(--text-3); }
 .ticks svg { width:15px; height:15px; }
 .ticks.read { color:#7dd3fc; }
 .message .message-media { margin-top:7px; border-radius:11px; max-width:100%; max-height:320px; object-fit:cover; }
@@ -427,33 +510,20 @@ svg.ic { flex-shrink:0; }
 .toast.warning .t-ic { background:rgba(245,158,11,.16); color:var(--warning); }
 
 /* دکمه منوی شناور + کشوی ناوبری موبایل (اسلاید از راست) */
-.nav-fab { display:none; position:fixed; bottom:18px; right:18px; z-index:900; width:54px; height:54px; border-radius:50%; border:none; background:var(--grad); color:#fff; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 8px 26px rgba(99,102,241,.45); transition:transform .25s, opacity .25s; }
-.nav-fab:active { transform:scale(.92); }
-.nav-fab.hidden { opacity:0; pointer-events:none; transform:scale(.6); }
 .fab-dot { position:absolute; top:4px; left:4px; width:12px; height:12px; border-radius:50%; background:var(--pink); border:2.5px solid var(--bg); display:none; }
-.drawer-overlay { display:none; position:fixed; inset:0; z-index:940; background:rgba(3,5,10,.55); backdrop-filter:blur(3px); }
-.drawer-overlay.open { display:block; animation:fadeIn .2s; }
-.nav-drawer { position:fixed; top:0; bottom:0; right:0; z-index:950; width:min(280px, 82vw); background:var(--surface-solid); border-left:1px solid var(--border-2); box-shadow:var(--shadow-lg); transform:translateX(105%); transition:transform .32s cubic-bezier(.4,0,.2,1); display:flex; flex-direction:column; padding:16px 12px calc(14px + env(safe-area-inset-bottom)); gap:4px; }
-.nav-drawer.open { transform:translateX(0); }
-.drawer-head { display:flex; align-items:center; gap:10px; padding:6px 8px 16px; }
-.drawer-head .logo-mark { width:40px; height:40px; min-width:40px; border-radius:13px; background:var(--grad); border:none; display:flex; align-items:center; justify-content:center; }
-.drawer-head h2 { font-size:16.5px; font-weight:900; background:var(--grad); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
-.drawer-head small { display:block; font-size:9.5px; color:var(--text-3); font-weight:400; }
-.drawer-head .icon-btn { margin-right:auto; }
-.nav-drawer .nav-item { padding:12px 14px; font-size:14px; }
-.nav-drawer .nav-item.active { background:var(--grad-soft); color:var(--primary-light); font-weight:700; }
-.drawer-sep { height:1px; background:var(--border); margin:8px 6px; }
-.drawer-foot { margin-top:auto; text-align:center; font-size:10px; color:var(--text-3); padding-top:12px; }
 
 @media (max-width:900px) {
-    /* موبایل: بدون نوار بالا و بدون نوار پایین — منو کشوی اسلایدی است */
-    .topbar { display:none; }
-    .sidenav { display:none; }
-    .nav-fab { display:flex; }
-    .pages { bottom:0; top:0; }
-    .page .explore-wrap, .page .lan-wrap, .page .admin-wrap, .page .profile-wrap, .page .voice-wrap { padding-bottom:86px; }
+    /* موبایل: همان نوار بالای صفحه، با بخش‌های قابل اسکراف */
+    .topbar { padding:7px 10px; gap:8px; }
+    .tb-brand h1 { font-size:14.5px; }
+    .tb-nav { order:3; flex-basis:100%; }
+    .tb-nav .nav-item { padding:7px 11px; font-size:12.5px; }
+    .topbar .nav-user .nu-role { display:none; }
     .notif-panel { top:10px; }
     .grid-posts { grid-template-columns:1fr; }
+}
+@media (max-width:520px) {
+    .tb-brand small, .topbar .online-pill { display:none; }
 }
 </style>
 </head>
@@ -506,56 +576,45 @@ svg.ic { flex-shrink:0; }
 <!-- ═══ پوسته اصلی ═══ -->
 <div class="app-shell" id="appShell" style="display:none">
 
-    <aside class="sidenav">
-        <div class="brand">
-            <div class="logo-mark"><svg class="ic" width="19" height="19" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" fill="#fff"/></svg></div>
-            <div><h1>Volexturn</h1><small>نسخه Public v3.1</small></div>
-        </div>
-        <button class="nav-item active" data-tab="chat" onclick="switchTab('chat', this)">
-            <svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            چت‌ها
-        </button>
-        <button class="nav-item" data-tab="explore" onclick="switchTab('explore', this)">
-            <svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
-            اکسپلور
-        </button>
-        <button class="nav-item" data-tab="lan" onclick="switchTab('lan', this)">
-            <svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="6"/><line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><line x1="15" y1="13" x2="15.01" y2="13"/><line x1="18" y1="11" x2="18.01" y2="11"/></svg>
-            بازی LAN
-        </button>
-        <button class="nav-item" data-tab="voice" onclick="switchTab('voice', this)">
-            <svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
-            ویس‌چت
-        </button>
-        <button class="nav-item" id="adminTabBtn" data-tab="admin" style="display:none" onclick="switchTab('admin', this)">
-            <svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            مدیریت
-        </button>
-        <button class="nav-item" data-tab="profile" onclick="switchTab('profile', this)">
-            <svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            پروفایل
-        </button>
-        <div class="spacer"></div>
-        <button class="nav-item" onclick="toggleTheme()" id="themeNavBtn">
-            <svg class="ic" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" id="themeIcon"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-            <span id="themeLabel">تم روشن</span>
-        </button>
-        <div class="nav-user" onclick="switchTab('profile', document.querySelector('[data-tab=profile]'))">
-            <div class="avatar" id="navAvatar" style="width:36px; height:36px;"></div>
-            <div>
-                <div class="nu-name" id="navName">کاربر</div>
-                <div class="nu-role" id="navRole">عضو</div>
-            </div>
-        </div>
-    </aside>
 
     <div class="main-col">
-        <header class="topbar">
-            <div class="logo-mark"><svg class="ic" width="15" height="15" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" fill="#fff"/></svg></div>
-            <div>
-                <div class="tb-title" id="tbTitle">چت‌ها</div>
-                <div class="tb-sub" id="tbSub">گفتگو با دوستان و گروه‌ها</div>
+        <header class="topbar" id="topbar">
+            <div class="tb-brand">
+                <div class="logo-mark"><svg class="ic" width="15" height="15" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" fill="#fff"/></svg></div>
+                <div>
+                    <div class="tb-title" id="tbTitle">چت‌ها</div>
+                    <div class="tb-sub" id="tbSub">گفتگو با دوستان و گروه‌ها</div>
+                </div>
             </div>
+
+            <!-- همهٔ بخش‌های پلتفرم در یک نوار بالای صفحه -->
+            <nav class="tb-nav" id="topbarNav">
+                <button class="nav-item active" data-tab="chat" onclick="switchTab('chat', this)">
+                    <svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    چت‌ها
+                </button>
+                <button class="nav-item" data-tab="explore" onclick="switchTab('explore', this)">
+                    <svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
+                    اکسپلور
+                </button>
+                <button class="nav-item" data-tab="lan" onclick="switchTab('lan', this)">
+                    <svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="6"/><line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><line x1="15" y1="13" x2="15.01" y2="13"/><line x1="18" y1="11" x2="18.01" y2="11"/></svg>
+                    بازی LAN
+                </button>
+                <button class="nav-item" data-tab="voice" onclick="switchTab('voice', this)">
+                    <svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+                    ویس‌چت
+                </button>
+                <button class="nav-item" id="adminTabBtn" data-tab="admin" style="display:none" onclick="switchTab('admin', this)">
+                    <svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                    مدیریت
+                </button>
+                <button class="nav-item" data-tab="profile" onclick="switchTab('profile', this)">
+                    <svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    پروفایل
+                </button>
+            </nav>
+
             <div class="tb-right">
                 <div class="online-pill"><div class="pulse-dot"></div><span id="onlineCount">۱</span><span class="on-tx">آنلاین</span></div>
                 <button class="icon-btn" id="notifBtn" onclick="toggleNotifPanel()" title="اعلان‌ها">
@@ -565,6 +624,13 @@ svg.ic { flex-shrink:0; }
                 <button class="icon-btn" onclick="toggleTheme()" title="تغییر تم">
                     <svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" id="themeIcon2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
                 </button>
+                <div class="nav-user" onclick="switchTab('profile', document.querySelector('[data-tab=profile]'))">
+                    <div class="avatar" id="navAvatar" style="width:30px; height:30px;"></div>
+                    <div>
+                        <div class="nu-name" id="navName">کاربر</div>
+                        <div class="nu-role" id="navRole">عضو</div>
+                    </div>
+                </div>
             </div>
         </header>
 
@@ -584,7 +650,11 @@ svg.ic { flex-shrink:0; }
                     <div class="chat-side">
                         <div class="side-tabs">
                             <button class="side-tab active" id="sideTabUsers" onclick="setSideList('users')">👤 کاربران</button>
+                            <button class="side-tab" id="sideTabChannels" onclick="setSideList('channels')">📢 کانال‌ها</button>
                             <button class="side-tab" id="sideTabGroups" onclick="setSideList('groups')">👥 گروه‌ها<span class="side-badge" id="groupsUnreadTotal" style="display:none;"></span></button>
+                            <button class="icon-btn sm" onclick="openChannelModal()" title="کانال جدید" style="color:var(--primary-light);">
+                                <svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11v2a1 1 0 0 0 1 1h2l4 4V6L6 10H4a1 1 0 0 0-1 1z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+                            </button>
                             <button class="icon-btn sm" onclick="openGroupModal()" title="گروه جدید" style="color:var(--primary-light);">
                                 <svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                             </button>
@@ -606,6 +676,12 @@ svg.ic { flex-shrink:0; }
                                 <div class="ch-status" id="chatHeaderStatus"></div>
                             </div>
                             <div class="ch-actions">
+                                <button class="icon-btn sm" id="btnCallAudio" title="تماس صوتی" onclick="startCall(false)">
+                                    <svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                                </button>
+                                <button class="icon-btn sm" id="btnCallVideo" title="تماس تصویری" onclick="startCall(true)">
+                                    <svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+                                </button>
                                 <button class="icon-btn sm" title="اطلاعات گفتگو" onclick="openCurrentChatInfo()">
                                     <svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
                                 </button>
@@ -632,6 +708,29 @@ svg.ic { flex-shrink:0; }
                                 <div style="font-size:11.5px;">از لیست کنار، یک نفر یا گروه را انتخاب کن</div>
                             </div>
                             <div id="msgsList"></div>
+                            <div id="channelPane" style="display:none;">
+                                <div class="ch-hero">
+                                    <div class="ch-hero-av" id="chHeroAv"></div>
+                                    <div class="ch-hero-name" id="chHeroName"></div>
+                                    <div class="ch-hero-bio" id="chHeroBio"></div>
+                                    <div class="ch-hero-meta" id="chHeroMeta"></div>
+                                    <div class="ch-hero-act">
+                                        <button class="btn sm" id="chSubBtn" onclick="toggleChannelSub()"></button>
+                                        <button class="btn sm danger" id="chDelBtn" onclick="deleteChannel()" style="display:none;">حذف کانال</button>
+                                    </div>
+                                </div>
+                                <div id="channelPosts"></div>
+                            </div>
+                        </div>
+                        <div class="channel-composer" id="channelComposer" style="display:none;">
+                            <input type="file" id="channelFileIn" accept="image/*,video/*,audio/*" style="display:none;" onchange="channelFilePicked(this)">
+                            <button class="icon-btn" title="پیوست" onclick="document.getElementById('channelFileIn').click()">
+                                <svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                            </button>
+                            <input type="text" id="channelInput" placeholder="برای مشترک‌ها بنویس…" onkeydown="if(event.key==='Enter')postToChannel()">
+                            <button class="send-btn" onclick="postToChannel()" title="انتشار">
+                                <svg class="ic" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                            </button>
                         </div>
                         <div class="compose-banner" id="composeBanner">
                             <span class="cb-ic" id="composeIcon"></span>
@@ -661,6 +760,11 @@ svg.ic { flex-shrink:0; }
             <div class="page" id="exploreTab">
                 <div class="explore-wrap">
                     <div class="stories-bar" id="storiesBar"></div>
+                    <div class="exp-head">
+                        <h3>📅 رویدادها</h3>
+                        <button class="btn btn-ghost" onclick="openNewEventModal()">+ رویداد جدید</button>
+                    </div>
+                    <div id="eventsList" style="margin-bottom:20px;"></div>
                     <div class="exp-head">
                         <h3>پست‌ها و ویدیوها</h3>
                         <button class="btn btn-ghost" onclick="openNewPostModal()">
@@ -705,16 +809,28 @@ svg.ic { flex-shrink:0; }
                         <div class="voice-orb" id="voiceOrb">
                             <svg class="ic" width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
                         </div>
-                        <h2 style="font-size:18px; font-weight:900;">اتاق گفتگوی زنده</h2>
-                        <p style="font-size:12px; color:var(--text-2); margin-top:6px; line-height:2;">وصل شو و با بقیه‌ی اعضای آنلاین شبکه، زنده و صوتی حرف بزن.</p>
+                        <h2 style="font-size:18px; font-weight:900;">اتاق گفتگوی صوتی</h2>
+                        <p style="font-size:12px; color:var(--text-2); margin-top:6px; line-height:2;">نام اتاق را بنویس و وصل شو. هرکس همان نام را بزند، هم‌اتاقیِ تو است.</p>
                         <div class="eq" id="voiceEq"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
-                        <div style="max-width:270px; margin:14px auto 0;">
+                        <div style="max-width:290px; margin:12px auto 0; display:flex; flex-direction:column; gap:8px;">
+                            <input type="text" id="voiceRoomInput" maxlength="32" placeholder="نام اتاق، مثلاً «دوستان»" dir="rtl" style="padding:9px 12px; border-radius:var(--r-md); border:1px solid var(--border); background:var(--surface-2); color:var(--text); font-family:inherit; font-size:12.5px;">
                             <button class="btn" id="voiceConnectBtn" onclick="toggleVoiceConnect()">
                                 <svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
-                                اتصال به ویس‌چت
+                                اتصال به اتاق
+                            </button>
+                            <button class="btn btn-ghost" id="voiceMuteBtn" onclick="toggleVoiceMute()" style="display:none;">
+                                🎙️ بی‌صدا کردن میکروفون
                             </button>
                         </div>
-                        <div class="voice-note">اتصال P2P رمزنگاری‌شده WebRTC</div>
+                        <div id="voiceDevices" style="display:none; max-width:290px; margin:10px auto 0; flex-direction:column; gap:7px; text-align:right;">
+                            <label style="font-size:11px; color:var(--text-3); display:block;">میکروفون
+                                <select id="voiceMicSel" onchange="onMicDeviceChange()" style="width:100%; margin-top:3px; padding:7px 9px; border-radius:var(--r-md); border:1px solid var(--border); background:var(--surface-2); color:var(--text); font-family:inherit; font-size:11.5px;"></select>
+                            </label>
+                            <label style="font-size:11px; color:var(--text-3); display:block;">بلندگو / هدفون
+                                <select id="voiceSpkSel" onchange="onSpeakerDeviceChange()" style="width:100%; margin-top:3px; padding:7px 9px; border-radius:var(--r-md); border:1px solid var(--border); background:var(--surface-2); color:var(--text); font-family:inherit; font-size:11.5px;"></select>
+                            </label>
+                        </div>
+                        <div class="voice-note">P2P رمزنگاری‌شدهٔ WebRTC · Mesh، بدون سرور رسانه</div>
                         <div class="mic-hint" id="micHint">
                             🎤 <b>میکروفون کار نمی‌کند؟</b><br>
                             مرورگرها فقط در حالت <b>localhost</b> یا <b>HTTPS</b> اجازه میکروفون می‌دهند.<br>
@@ -724,7 +840,7 @@ svg.ic { flex-shrink:0; }
                         </div>
                     </div>
                     <div class="voice-peers">
-                        <h4>افراد آنلاین در شبکه</h4>
+                        <h4 id="voicePeersTitle">حاضران در اتاق</h4>
                         <div id="voicePeersList"></div>
                     </div>
                 </div>
@@ -746,6 +862,19 @@ svg.ic { flex-shrink:0; }
                         <div id="adminUsersList"></div>
                     </div>
                     <div class="admin-section">
+                        <h4>🚫 نشانی‌های مسدود</h4>
+                        <div class="cc-hint" style="font-size:11.5px; color:var(--text-3); line-height:1.8; margin-bottom:8px;">
+                            هر کاربری که بن شود، نشانی IP آخرین نشستش هم بسته می‌شود.
+                            <br><b style="color:var(--warning);">هشدار:</b> اگر خودت و بقیه پشت یک NAT یا مودم مشترک هستید
+                            (خانه، خوابگاه، مدرسه)، بنِ محدوده ممکن است خودت را هم بیرون بیندازد.
+                        </div>
+                        <div style="display:flex; gap:7px; margin-bottom:9px; flex-wrap:wrap;">
+                            <input type="text" id="manualBanIp" dir="ltr" placeholder="91.98.7.211 یا 91.98.7.0/24" style="flex:1; min-width:190px; padding:7px 11px; border-radius:var(--r-md); border:1px solid var(--border); background:var(--surface-2); color:var(--text); font-family:inherit; font-size:12px;">
+                            <button class="btn sm" onclick="banIpManual()">بستن نشانی</button>
+                        </div>
+                        <div id="bannedIpsList"></div>
+                    </div>
+                    <div class="admin-section">
                         <h4>📝 مدیریت پست‌ها</h4>
                         <div id="adminPostsList"></div>
                     </div>
@@ -762,6 +891,43 @@ svg.ic { flex-shrink:0; }
             <!-- ═══ پروفایل ═══ -->
             <div class="page" id="profileTab">
                 <div class="profile-wrap">
+                    <div class="contacts-card" id="notifCard">
+                        <h3>
+                            <svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+                            اعلان روی گوشی
+                        </h3>
+                        <div class="cc-hint" id="notifHint"></div>
+                        <div class="notif-row">
+                            <span class="notif-state" id="notifState"></span>
+                            <button class="btn sm" id="notifBtn" onclick="toggleNotifications()">روشن کردن</button>
+                            <button class="btn sm btn-outline" onclick="testNotification()">آزمایش</button>
+                        </div>
+                    </div>
+                    <div class="contacts-card">
+                        <h3>
+                            <svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                            همسان‌سازی مخاطبین
+                        </h3>
+                        <div class="cc-hint">
+                            فقط <b>هش</b> شماره‌ها مقایسه می‌شود و هیچ شمارهٔ خامی روی شبکه نمی‌رود.
+                            اول شمارهٔ خودت را ثبت کن تا دیگران پیدایت کنند.
+                        </div>
+                        <div class="phone-input">
+                            <input type="tel" id="myPhoneInput" placeholder="شمارهٔ من، مثلاً 09121234567" dir="ltr">
+                            <button class="btn sm" onclick="saveMyPhone()">ثبت</button>
+                        </div>
+                        <div style="display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;">
+                            <button class="btn sm" onclick="syncContacts()">
+                                <svg class="ic" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                                خواندن مخاطبین گوشی
+                            </button>
+                            <button class="btn sm ghost" onclick="document.getElementById('vcfFileIn').click()">واردکردن فایل vcf</button>
+                            <input type="file" id="vcfFileIn" accept=".vcf,text/vcard,text/x-vcard" style="display:none;" onchange="importVCF(this)">
+                            <button class="btn sm ghost" onclick="clearImportedContacts()">پاک‌کردن واردشده‌ها</button>
+                        </div>
+                        <textarea id="manualPhones" style="display:none; width:100%; margin-top:10px; min-height:74px;" dir="ltr" placeholder="هر شماره در یک خط&#10;09121234567&#10;+989121234567" oninput="lookupManualPhones()"></textarea>
+                        <div id="contactsResult" style="margin-top:10px;"></div>
+                    </div>
                     <div class="profile-card">
                         <div class="profile-avatar-ring"><div class="inner"><div class="avatar" id="profileAvatar"></div></div></div>
                         <h2 id="profileName">نام کاربر</h2>
@@ -798,56 +964,49 @@ svg.ic { flex-shrink:0; }
     </div>
 </div>
 
-<!-- منوی شناور + کشوی ناوبری موبایل -->
-<button class="nav-fab" id="navFab" onclick="toggleDrawer()" title="منو">
-    <svg class="ic" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="14" y2="17"/></svg>
-    <span class="fab-dot" id="fabNotifDot"></span>
-</button>
-<div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
-<nav class="nav-drawer" id="navDrawer">
-    <div class="drawer-head">
-        <div class="logo-mark"><svg class="ic" width="19" height="19" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" fill="#fff"/></svg></div>
-        <div><h2>Volexturn</h2><small>نسخه Public v3.1</small></div>
-        <button class="icon-btn sm" onclick="closeDrawer()">
-            <svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+
+<!-- ═══ تماس WebRTC ═══ -->
+<div class="call-overlay" id="callOverlay">
+    <video id="remoteVideo" autoplay playsinline></video>
+    <video id="localVideo" autoplay playsinline muted></video>
+    <div class="call-top">
+        <div class="avatar" id="callAvatar"></div>
+        <div class="call-name" id="callName">—</div>
+        <div class="call-state" id="callState">در حال اتصال…</div>
+    </div>
+    <div class="call-actions">
+        <button class="call-btn" id="btnMute" onclick="toggleMute()" title="بی‌صدا">
+            <svg class="ic" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg>
+        </button>
+        <button class="call-btn" id="btnCam" onclick="toggleCam()" title="دوربین">
+            <svg class="ic" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/></svg>
+        </button>
+        <button class="call-btn" id="btnSpk" onclick="toggleSpeaker()" title="بلندگو">
+            <svg class="ic" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+        </button>
+        <button class="call-btn end" onclick="endCall()" title="پایان تماس">
+            <svg class="ic" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
         </button>
     </div>
-    <button class="nav-item active" data-tab="chat" onclick="switchTab('chat', this)">
-        <svg class="ic" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-        چت‌ها
-    </button>
-    <button class="nav-item" data-tab="explore" onclick="switchTab('explore', this)">
-        <svg class="ic" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
-        اکسپلور
-    </button>
-    <button class="nav-item" data-tab="lan" onclick="switchTab('lan', this)">
-        <svg class="ic" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="6"/><line x1="6" y1="12" x2="10" y2="12"/><line x1="8" y1="10" x2="8" y2="14"/><line x1="15" y1="13" x2="15.01" y2="13"/><line x1="18" y1="11" x2="18.01" y2="11"/></svg>
-        بازی LAN
-    </button>
-    <button class="nav-item" data-tab="voice" onclick="switchTab('voice', this)">
-        <svg class="ic" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
-        ویس‌چت
-    </button>
-    <button class="nav-item" id="adminTabBtnM" data-tab="admin" style="display:none" onclick="switchTab('admin', this)">
-        <svg class="ic" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-        مدیریت
-    </button>
-    <button class="nav-item" data-tab="profile" onclick="switchTab('profile', this)">
-        <svg class="ic" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-        پروفایل
-    </button>
-    <div class="drawer-sep"></div>
-    <button class="nav-item" onclick="closeDrawer(); toggleNotifPanel()">
-        <svg class="ic" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-        اعلان‌ها
-        <span class="notif-badge" id="notifBadgeM" style="display:none; position:static; margin-right:auto;"></span>
-    </button>
-    <button class="nav-item" onclick="toggleTheme()">
-        <svg class="ic" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" id="themeIcon3"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-        <span id="themeLabelM">تم روشن</span>
-    </button>
-    <div class="drawer-foot">Volexturn v3.1.0 • ساخته‌شده با ❤️ توسط javadxpro</div>
-</nav>
+</div>
+<div class="call-incoming" id="callIncoming">
+    <div class="ci-box">
+        <div class="avatar" id="ciAvatar"></div>
+        <div class="ci-title" id="ciName">تماس ورودی</div>
+        <div class="ci-sub" id="ciSub">تماس صوتی</div>
+        <div class="ci-actions">
+            <button class="call-btn end" onclick="rejectCall()" title="رد">
+                <svg class="ic" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+            <button class="call-btn accept" onclick="answerCall()" title="پاسخ">
+                <svg class="ic" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ═══ پیشرفت ارسال/دریافت رسانه ═══ -->
+<div class="xfer-pill" id="xferPill"><span id="xferLabel">در حال ارسال…</span><div class="bar"><i id="xferBar"></i></div><span id="xferPct">۰٪</span></div>
 
 <!-- ═══ منوی عملیات پیام ═══ -->
 <div id="msgMenu"></div>
@@ -920,6 +1079,31 @@ svg.ic { flex-shrink:0; }
     </div>
 </div>
 
+<div class="modal" id="newEventModal">
+    <div class="modal-body">
+        <h3>📅 رویداد جدید</h3>
+        <div class="field">
+            <input type="text" id="evTitle" maxlength="120" placeholder="عنوان رویداد، مثلاً «فوتبال کوچه ابوذَر»">
+        </div>
+        <div class="field">
+            <input type="datetime-local" id="evStartsAt">
+        </div>
+        <div class="field">
+            <input type="text" id="evPlace" maxlength="200" placeholder="مکان (اختیاری)، مثلاً «کوچهٔ پشت مدرسه»">
+        </div>
+        <div class="field">
+            <textarea id="evDesc" rows="3" maxlength="2000" placeholder="توضیح (اختیاری)"></textarea>
+        </div>
+        <label style="display:flex; align-items:center; gap:7px; font-size:12px; color:var(--text-2); margin-bottom:10px;">
+            <input type="checkbox" id="evPublic" checked> همه بتوانند ببینند
+        </label>
+        <div class="m-actions">
+            <button class="btn" onclick="submitEvent()">ساخت رویداد</button>
+            <button class="btn btn-outline" onclick="closeModals()">انصراف</button>
+        </div>
+    </div>
+</div>
+
 <div class="modal" id="editProfileModal">
     <div class="modal-body">
         <h3>✏️ ویرایش پروفایل</h3>
@@ -956,6 +1140,22 @@ svg.ic { flex-shrink:0; }
 </div>
 
 <!-- گروه جدید -->
+<div class="modal" id="channelModal">
+    <div class="modal-body">
+        <h3>📢 ساخت کانال جدید</h3>
+        <div style="font-size:11.5px; color:var(--text-3); margin-bottom:9px; line-height:1.7;">
+            کانال یک‌طرفه است: فقط تو منتشر می‌کنی و بقیه عضو می‌شوند و می‌خوانند.
+            مثل بقیهٔ پلتفرم، موقتی است و جایی ذخیره نمی‌شود.
+        </div>
+        <div class="field"><input type="text" id="channelName" placeholder="نام کانال (مثلاً اخبار فناوری)"></div>
+        <div class="field"><input type="text" id="channelBio" placeholder="توضیح کوتاه (اختیاری)"></div>
+        <div class="m-actions">
+            <button class="btn" onclick="createChannel()">ساخت کانال</button>
+            <button class="btn btn-outline" onclick="closeModals()">انصراف</button>
+        </div>
+    </div>
+</div>
+
 <div class="modal" id="groupModal">
     <div class="modal-body">
         <h3>👥 ساخت گروه جدید</h3>
@@ -1091,7 +1291,7 @@ function avatarHTML(u, size) {
     const colors = ['#6366f1','#a855f7','#ec4899','#f59e0b','#10b981','#22d3ee','#f43f5e','#8b5cf6'];
     const cid = (u && u.id ? u.id : 0) % colors.length;
     const bg = colors[cid];
-    if (u && u.avatar) return `<div class="avatar" style="width:${size}px;height:${size}px;"><img src="/files/profiles/${esc(u.avatar)}" onerror="this.parentNode.textContent='${esc((u.full_name||'؟')[0])}';this.parentNode.style.background='${bg}'"></div>`;
+    if (u && u.avatar) return `<div class="avatar" style="width:${size}px;height:${size}px;"><img src="${esc(mediaURL('profiles', u.avatar))}" onerror="this.parentNode.textContent='${esc((u.full_name||'؟')[0])}';this.parentNode.style.background='${bg}'"></div>`;
     const ch = (u && (u.full_name || u.username || u.name) ? (u.full_name || u.username || u.name) : '؟').trim()[0];
     return `<div class="avatar" style="width:${size}px;height:${size}px;background:linear-gradient(135deg,${bg},${bg}cc);font-size:${Math.round(size*0.42)}px;border:none;">${esc(ch)}</div>`;
 }
@@ -1222,11 +1422,11 @@ function applyThemeIcons() {
     const dark = document.documentElement.getAttribute('data-theme') === 'dark';
     const moon = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>';
     const sun = '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>';
-    for (const id of ['themeIcon', 'themeIcon2', 'themeIcon3']) {
+    for (const id of ['themeIcon', 'themeIcon2']) {
         const el = document.getElementById(id);
         if (el) el.innerHTML = dark ? moon : sun;
     }
-    ['themeLabel', 'themeLabelM'].forEach(id => {
+    ['themeLabel'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.textContent = dark ? 'تم روشن' : 'تم تاریک';
     });
@@ -1293,7 +1493,6 @@ function initUI() {
     loadNotifications();
     if (currentUser.role === 'admin') {
         document.getElementById('adminTabBtn').style.display = 'flex';
-        document.getElementById('adminTabBtnM').style.display = 'flex';
     }
 }
 function updateProfileDisplay() {
@@ -1335,6 +1534,7 @@ function connectSocket() {
     socket.on('connect', () => socket.emit('join', { user_id: currentUser.id }));
     socket.on('new_message', (msg) => {
         const mine = msg.sender_id == currentUser.id;
+        notifyNewMessage(msg);
         if (msg.group_id) {
             if (selectedGroupId == msg.group_id) {
                 appendMessage(msg);
@@ -1357,6 +1557,52 @@ function connectSocket() {
     });
     socket.on('user_status', () => { loadUsers(); renderVoicePeers(); });
     socket.on('groups_changed', () => loadGroups());
+    socket.on('events_changed', () => {
+        /* فقط اگر تب اکسپلور باز است؛ وگرنه برای هر RSVP الکی درخواست می‌زنیم */
+        if (document.getElementById('exploreTab').style.display === 'block') loadEvents();
+    });
+    /*
+     * مدیر بنمان کرده: نشست را پاک می‌کنیم و به صفحهٔ ورود برمی‌گردیم.
+     * بدون این، کاربرِ بن‌شده تا رفرش کردن فکر می‌کرد هنوز وصل است.
+     */
+    socket.on('banned', (d) => {
+        localStorage.removeItem('volexturn_user');
+        localStorage.removeItem('volexturn_token');
+        try { if (window.JVL && JVL.shutdown) JVL.shutdown(); } catch { /* ignore */ }
+        toast((d && d.message) || 'حساب کاربری تو مسدود شد', 'error');
+        setTimeout(() => location.reload(), 1600);
+    });
+    socket.on('channels_changed', () => loadChannels());
+    socket.on('channel_post_added', (d) => {
+        if (selectedChannelId && d && d.channel_id == selectedChannelId) loadChannelPosts();
+    });
+    /*
+     * تیک دوم: پیام به دستگاه گیرنده رسیده. فقط همان حباب‌هایی که
+     * شناسه‌شان آمده به‌روز می‌شوند، نه کل لیست.
+     */
+    socket.on('message_delivered', (d) => {
+        const ids = new Set((d && d.message_ids ? d.message_ids : []).map(Number));
+        if (!ids.size) return;
+        let changed = 0;
+        for (const id of ids) {
+            const m = msgCache[id];
+            if (m && !m.seen && !m.delivered) { m.delivered = true; changed++; }
+        }
+        if (!changed) return;
+        for (const id of ids) {
+            const el = document.getElementById('msg-' + id);
+            const t = el && el.querySelector('.ticks');
+            if (t && !t.classList.contains('read')) {
+                t.classList.add('delivered');
+                t.title = 'تحویل داده شد';
+                t.innerHTML = TICKS_SVG;
+            }
+        }
+    });
+    /* رسانهٔ تکه‌تکه: پیشرفت ارسال و دریافت، و رندر مجدد وقتی کامل شد */
+    bindCallSignals(socket);
+    socket.on('upload_progress', d => xferProgress('در حال ارسال…', d.sent, d.total));
+    socket.on('download_progress', d => xferProgress('در حال دریافت…', d.got, d.total));
     socket.on('message_updated', () => { if (selectedUserId || selectedGroupId) loadMessages(true); });
     socket.on('message_deleted', () => { if (selectedUserId || selectedGroupId) loadMessages(true); });
     socket.on('messages_seen', (d) => {
@@ -1391,19 +1637,52 @@ function connectSocket() {
     socket.on('post_view', (d) => updatePostCounts(d.post_id, { views: d.views }));
     socket.on('follow_update', (d) => { if (d.target_id == profileModalUserId) openProfileModal(d.target_id); });
     socket.on('voice_signal', async (data) => {
-        const { sender, signal } = data;
+        const sender = Number(data.sender);
+        const signal = data.signal || {};
+        if (!currentUser || sender === Number(currentUser.id)) return;
+        /* لایهٔ دفاعی: اگر رله اشتباهاً پیام اتاق دیگری را رساند، نادیده بگیر */
+        if (data.room && String(data.room) !== String(voiceRoomName())) return;
+
+        /* ── پیام‌های مدیریتی اتاق: به همهٔ اتاق می‌روند، نه یک نفر ── */
+        if (signal.t === 'hello' || signal.t === 'here') {
+            if (!localStream) return;
+            const known = voiceRoster.has(sender);
+            rosterTouch(sender, signal.name, signal.muted);
+            if (signal.t === 'hello') voiceSend({ t: 'here', name: currentUser.full_name, muted: voiceMuted });
+            /*
+             * برای هم‌اتاقیِ تازه مذاکره را شروع کن. قانون: شناسهٔ کوچک‌تر پیشنهاد
+             * می‌دهد، پس هیچ‌وقت دو طرف هم‌زمان offer نمی‌دهند. `!known` جلوِ
+             * ساختِ پیشنهادِ دوباره در هر تپش را می‌گیرد.
+             */
+            if (!known && Number(currentUser.id) < sender) voiceOffer(sender);
+            return;
+        }
+        if (signal.t === 'bye') {
+            voiceRoster.delete(sender); dropPeer(sender); renderVoicePeers(); return;
+        }
+        if (signal.t === 'mute') {
+            const p = voiceRoster.get(sender);
+            if (p) { p.muted = !!signal.muted; paintVoiceDot(sender); }
+            return;
+        }
+
         if (!localStream) return;
-        if (!peerConnections[sender]) createPeerConnection(sender);
+        /* رله به کل اتاق می‌فرستد؛ سیگنال WebRTC فقط به گیرندهٔ خودش مربوط است */
+        if (signal.to && Number(signal.to) !== Number(currentUser.id)) return;
         try {
             if (signal.sdp) {
-                await peerConnections[sender].setRemoteDescription(new RTCSessionDescription(signal.sdp));
+                if (!peerConnections[sender]) createPeerConnection(sender);
+                const pc = peerConnections[sender];
+                /* آبجکت ساده کافی است (مثل مسیر تماس یک‌به‌یک)؛ پوشش
+                   RTCSessionDescription میراث قدیمی است و لازم نیست */
+                await pc.setRemoteDescription(signal.sdp);
                 if (signal.sdp.type === 'offer') {
-                    const answer = await peerConnections[sender].createAnswer();
-                    await peerConnections[sender].setLocalDescription(answer);
-                    socket.emit('voice_signal', { room:'global_voice', sender: currentUser.id, signal:{ sdp: answer } });
+                    const answer = await pc.createAnswer();
+                    await pc.setLocalDescription(answer);
+                    voiceSendTo(sender, { sdp: pc.localDescription });
                 }
             } else if (signal.candidate) {
-                await peerConnections[sender].addIceCandidate(new RTCIceCandidate(signal.candidate));
+                if (peerConnections[sender]) await peerConnections[sender].addIceCandidate(signal.candidate);
             }
         } catch(e) { console.warn('voice signal error', e); }
     });
@@ -1414,11 +1693,14 @@ function setSideList(which) {
     sideList = which;
     document.getElementById('sideTabUsers').classList.toggle('active', which === 'users');
     document.getElementById('sideTabGroups').classList.toggle('active', which === 'groups');
+    document.getElementById('sideTabChannels').classList.toggle('active', which === 'channels');
+    if (which === 'channels') loadChannels();
     renderSideList();
 }
 function loadUsers() {
     apiFetch('/users').then(r => r.json()).then(users => {
         allUsersCache = users.filter(u => u.id != currentUser.id);
+        handleDeepLink();
         const online = users.filter(u => u.is_online).length;
         document.getElementById('onlineCount').textContent = fa(online);
         renderVoicePeers();
@@ -1442,9 +1724,35 @@ function renderSideList() {
     const list = document.getElementById('usersList');
     const q = (document.getElementById('userSearch').value || '').trim().toLowerCase();
     list.innerHTML = '';
+    if (sideList === 'channels') {
+        const chs = channelsCache.filter(c => !q || (c.name || '').toLowerCase().includes(q));
+        if (!chs.length) {
+            list.innerHTML = '<div class="empty-side">کانالی نیست 📢<br>با دکمهٔ بالا یک کانال بساز</div>';
+            return;
+        }
+        chs.forEach(c => {
+            const div = document.createElement('div');
+            div.className = `user-item ${selectedChannelId == c.id ? 'active' : ''}`;
+            div.onclick = () => selectChannel(c);
+            div.innerHTML = `
+                ${avatarHTML({ id: c.id + 2000, full_name: c.name }, 40)}
+                <div style="min-width:0;">
+                    <div class="ui-name">📢 ${esc(c.name)}</div>
+                    <div class="ui-sub">${fa(c.subscribers || 0)} مشترک · ${fa(c.posts || 0)} پست</div>
+                </div>
+                ${c.is_owner ? '<div class="unread-badge" style="background:var(--primary);">مالک</div>' : ''}
+            `;
+            list.appendChild(div);
+        });
+        return;
+    }
     if (sideList === 'users') {
+        /* علاوه بر نام و نام‌کاربری، با آیدی عددی هم پیدا می‌شود */
         const filtered = allUsersCache.filter(u =>
-            !q || (u.full_name || '').toLowerCase().includes(q) || (u.username || '').toLowerCase().includes(q)
+            !q || (u.full_name || '').toLowerCase().includes(q)
+                || (u.username || '').toLowerCase().includes(q)
+                || (localNameFor(u.id) || '').toLowerCase().includes(q)
+                || (q.length > 3 && String(u.id) === q)
         );
         if (!filtered.length) {
             list.innerHTML = '<div class="empty-side">هنوز کسی اینجا نیست 🌱<br>از دیگر دستگاه‌ها ثبت‌نام کنن تا دیده بشن</div>';
@@ -1453,14 +1761,16 @@ function renderSideList() {
         filtered.sort((a, b) => (b.is_online === true) - (a.is_online === true));
         filtered.forEach(u => {
             const n = unreadCounts[u.id] || 0;
+            /* اگر این کاربر را از vcf وارد کرده باشی، نامِ دفترچهٔ تلفنش اولویت دارد */
+            const bookName = localNameFor(u.id);
             const div = document.createElement('div');
             div.className = `user-item ${(!selectedGroupId && selectedUserId == u.id) ? 'active' : ''}`;
             div.onclick = () => selectUser(u);
             div.innerHTML = `
                 ${avatarHTML(u, 40)}
                 <div style="min-width:0;">
-                    <div class="ui-name">${esc(u.full_name)}</div>
-                    <div class="ui-sub">${u.is_online ? 'آنلاین' : 'آفلاین'} · @${esc(u.username)}</div>
+                    <div class="ui-name">${esc(bookName || u.full_name)}</div>
+                    <div class="ui-sub">${u.is_online ? 'آنلاین' : 'آفلاین'} · @${esc(u.username)}${bookName && bookName !== u.full_name ? ' · ' + esc(u.full_name) : ''}</div>
                 </div>
                 ${n ? `<div class="unread-badge">${fa(n)}</div>` : ''}
                 <div class="status-dot ${u.is_online ? 'online' : ''} ${n ? 'has-unread' : ''}"></div>
@@ -1504,6 +1814,7 @@ function updateChatStatus() {
     }
 }
 function selectUser(user) {
+    closeChannelPane();
     selectedUserId = user.id;
     selectedGroupId = null;
     selectedChatObj = user;
@@ -1516,6 +1827,7 @@ function selectUser(user) {
     loadMessages();
 }
 function selectGroup(g) {
+    closeChannelPane();
     selectedGroupId = g.id;
     selectedUserId = null;
     selectedChatObj = g;
@@ -1531,11 +1843,6 @@ function openChatCommon() {
     document.getElementById('chatEmpty') && (document.getElementById('chatEmpty').style.display = 'none');
     document.getElementById('chatInputArea').style.display = 'flex';
     document.getElementById('chatLayout').classList.add('chat-open');
-    /* موبایل: نوار پایین اسلاید می‌شود تا چت تمام‌صفحه باشد */
-    if (window.innerWidth <= 900) {
-        closeDrawer();
-        document.getElementById('navFab').classList.add('hidden');
-    }
     cancelCompose();
 }
 function exitChat() {
@@ -1543,7 +1850,6 @@ function exitChat() {
     selectedGroupId = null;
     selectedChatObj = null;
     document.getElementById('chatLayout').classList.remove('chat-open');
-    document.getElementById('navFab').classList.remove('hidden');
     document.getElementById('chatInputArea').style.display = 'none';
     const ec = document.getElementById('chatEmpty');
     if (ec) ec.style.display = 'flex';
@@ -1610,8 +1916,9 @@ function appendMessage(msg, animate = true) {
     }
     inner += msg.content ? linkifyHashtags(esc(msg.content)) : '';
     if (msg.file_path) {
-        const url = `/files/chat/${encodeURIComponent(msg.file_path)}`;
-        if (msg.file_type === 'image') inner += `<img src="${url}" class="message-media" loading="lazy">`;
+        const url = mediaURL('chat', msg.file_path);
+        if (!url) inner += `<div class="media-pending" data-media="${esc(String(msg.file_path))}"><div class="mp-spin"></div>در حال دریافت ${msg.file_type === 'video' ? 'ویدیو' : (msg.file_type === 'audio' ? 'صوت' : 'عکس')}…</div>`;
+        else if (msg.file_type === 'image') inner += `<img src="${url}" class="message-media" loading="lazy">`;
         else if (msg.file_type === 'video') inner += `<video src="${url}" controls playsinline class="message-media"></video>`;
         else if (msg.file_type === 'audio') inner += `<audio src="${url}" controls style="width:220px; margin-top:7px;"></audio>`;
         else inner += `<a class="file-chip" href="${url}" target="_blank"><svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>${esc(msg.file_name || 'فایل')}</a>`;
@@ -1619,7 +1926,11 @@ function appendMessage(msg, animate = true) {
     let ticks = '';
     if (isSent) ticks = isGroup
         ? `<span class="ticks">${TICK_SVG}</span>`
-        : `<span class="ticks ${msg.seen ? 'read' : ''}">${msg.seen ? TICKS_SVG : TICK_SVG}</span>`;
+        : (msg.seen
+            ? `<span class="ticks read" title="خوانده شد">${TICKS_SVG}</span>`
+            : (msg.delivered
+                ? `<span class="ticks delivered" title="تحویل داده شد">${TICKS_SVG}</span>`
+                : `<span class="ticks" title="ارسال شد">${TICK_SVG}</span>`));
     inner += `<span class="msg-meta"><span class="edited">${msg.edited_at ? 'ویرایش شده' : ''}</span><span class="msg-time">${faTime(msg.timestamp)}</span>${ticks}</span>`;
     inner += `<span class="msg-act" onclick="openMsgMenu(event, ${msg.id})"><svg class="ic" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg></span>`;
     div.innerHTML = inner;
@@ -1978,59 +2289,445 @@ function deleteGroup(gid) {
     });
 }
 
-/* ═══════════ ویس‌چت زنده ═══════════ */
+/* ═══════════ گفتگوی صوتی (Mesh، سبک) ═══════════ */
+/*
+ * مقیاس هدف حدود ۶ نفر است، پس Mesh: یک RTCPeerConnection به ازای هر هم‌اتاقی.
+ * عمداً هیچ وضعیتِ سمت سروری برای اتاق‌ها ساخته نشده — رلهٔ سیگنال همین حالا
+ * نام اتاق را پارامتر می‌گیرد، و فهرست حاضران با یک دست‌دادنِ hello/here روی
+ * همان کانال سیگنال ساخته می‌شود. یعنی اتاق‌های متعدد بدون یک خط تغییر در
+ * سرور یا شیم MQTT.
+ */
+const VOICE_BEAT_MS = 8000;     /* تپشِ اعلام حضور */
+const VOICE_PEER_TTL = 25000;   /* بیش از این بی‌خبر بماند، رفته حساب می‌شود */
+
+let voiceRoster = new Map();    /* uid → {name, at, muted} */
+let voiceMuted = false;
+let voiceBeatTimer = null;
+let voiceMeterTimer = null;
+let voiceCtx = null;
+let micAnalyser = null, micData = null;
+const peerAudio = new Map();    /* uid → {el, analyser, data, talking} */
+
+function voiceRoomName() {
+    const el = document.getElementById('voiceRoomInput');
+    const raw = String((el && el.value) || localStorage.getItem('jvl_voice_room') || 'اتاق اصلی').trim();
+    return raw || 'اتاق اصلی';
+}
+
+/** سیگنال/پیام برای همهٔ اتاق */
+function voiceSend(payload) {
+    if (!socket || !currentUser) return;
+    socket.emit('voice_signal', { room: voiceRoomName(), sender: currentUser.id, signal: payload });
+}
+/** سیگنال فقط برای یک هم‌اتاقی (رله به کل اتاق می‌فرستد، پس گیرنده باید فیلتر کند) */
+function voiceSendTo(uid, payload) { voiceSend(Object.assign({ to: uid }, payload)); }
+
+function voiceAudioCtx() {
+    if (voiceCtx) return voiceCtx;
+    const C = window.AudioContext || window.webkitAudioContext;
+    if (!C) return null;
+    try { voiceCtx = new C(); } catch { voiceCtx = null; }
+    return voiceCtx;
+}
+
+function voiceAnnounce(kind) {
+    voiceSend({ t: kind || 'hello', name: currentUser.full_name, muted: voiceMuted });
+}
+
+function rosterTouch(uid, name, muted) {
+    const prev = voiceRoster.get(uid);
+    voiceRoster.set(uid, {
+        name: name || (prev && prev.name) || ('کاربر ' + uid),
+        at: Date.now(),
+        muted: typeof muted === 'boolean' ? muted : !!(prev && prev.muted)
+    });
+    renderVoicePeers();
+}
+
+function rosterPrune() {
+    const t = Date.now();
+    let changed = false;
+    for (const uid of [...voiceRoster.keys()]) {
+        const p = voiceRoster.get(uid);
+        if (t - p.at > VOICE_PEER_TTL) { voiceRoster.delete(uid); dropPeer(uid); changed = true; }
+    }
+    if (changed) renderVoicePeers();
+}
+
+function voiceUserObj(uid, name) {
+    return allUsersCache.find(u => u.id == uid) || { id: uid, full_name: name, avatar: null, username: '' };
+}
+
 function renderVoicePeers() {
     const box = document.getElementById('voicePeersList');
     if (!box) return;
-    const online = allUsersCache.filter(u => u.is_online);
-    if (!online.length) {
-        box.innerHTML = '<div style="font-size:12px; color:var(--text-3); padding:7px 4px;">کسی جز تو آنلاین نیست — از دستگاه دیگه وصل شو 🙂</div>';
+    const title = document.getElementById('voicePeersTitle');
+    const live = !!localStream;
+    if (title) title.textContent = live ? `حاضران در «${voiceRoomName()}»` : 'حاضران در اتاق';
+    if (!live) {
+        box.innerHTML = '<div style="font-size:12px; color:var(--text-3); padding:7px 4px;">اول به اتاق وصل شو تا حاضران را ببینی.</div>';
         return;
     }
-    box.innerHTML = online.map(u => `
-        <div class="peer-row">${avatarHTML(u, 30)} ${esc(u.full_name)} <span style="font-size:10px; color:var(--success); margin-right:auto;">● آنلاین</span></div>
-    `).join('');
+    const row = (uid, u, isMe) => `
+        <div class="peer-row" id="vrow-${uid}">
+            ${avatarHTML(u, 30)}
+            <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+                ${esc(u.full_name)}${isMe ? ' <span style="font-size:10px; color:var(--text-3);">(تو)</span>' : ''}
+            </span>
+            <span class="vdot" id="vdot-${uid}" style="font-size:12px;">·</span>
+        </div>`;
+    let html = row('self', voiceUserObj(currentUser.id, currentUser.full_name), true);
+    for (const [uid, p] of voiceRoster) html += row(uid, voiceUserObj(uid, p.name), false);
+    box.innerHTML = html;
+    /* وضعیت صحبت/بی‌صدا بعد از هر رندر دوباره رنگ شود */
+    paintVoiceDot('self');
+    for (const uid of voiceRoster.keys()) paintVoiceDot(uid);
 }
+
+function paintVoiceDot(uid) {
+    const el = document.getElementById('vdot-' + uid);
+    if (!el) return;
+    const muted = uid === 'self' ? voiceMuted : !!(voiceRoster.get(uid) && voiceRoster.get(uid).muted);
+    const talking = uid === 'self' ? selfTalking : !!(peerAudio.get(uid) && peerAudio.get(uid).talking);
+    if (muted) { el.textContent = '🔇'; el.style.color = 'var(--text-3)'; }
+    else if (talking) { el.textContent = '🎙️'; el.style.color = 'var(--success)'; }
+    else { el.textContent = '·'; el.style.color = 'var(--text-3)'; }
+}
+
+let selfTalking = false;
+
+function startVoiceMeter() {
+    if (voiceMeterTimer) return;
+    /* به‌جای requestAnimationFrame از تایمر ۱۶۰ms استفاده می‌کنیم: برای نشانگر
+       «کی داره حرف می‌زنه» کاملاً کافی است و خیلی سبک‌تر. */
+    voiceMeterTimer = setInterval(() => {
+        const level = a => {
+            if (!a || !a.analyser) return 0;
+            a.analyser.getByteFrequencyData(a.data);
+            let sum = 0;
+            for (let i = 0; i < a.data.length; i++) sum += a.data[i];
+            return sum / a.data.length;
+        };
+        const meNow = level({ analyser: micAnalyser, data: micData }) > 8;
+        if (meNow !== selfTalking) { selfTalking = meNow; paintVoiceDot('self'); }
+        for (const [uid, p] of peerAudio) {
+            const t = level(p) > 8;
+            if (t !== p.talking) { p.talking = t; paintVoiceDot(uid); }
+        }
+    }, 160);
+}
+
+function stopVoiceMeter() {
+    if (voiceMeterTimer) { clearInterval(voiceMeterTimer); voiceMeterTimer = null; }
+}
+
+function attachAnalyser(stream) {
+    const ctx = voiceAudioCtx();
+    if (!ctx) return { analyser: null, data: null };
+    try {
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 512;
+        ctx.createMediaStreamSource(stream).connect(analyser);
+        return { analyser, data: new Uint8Array(analyser.frequencyBinCount) };
+    } catch { return { analyser: null, data: null }; }
+}
+
+function dropPeer(uid) {
+    const pc = peerConnections[uid];
+    if (pc) { try { pc.close(); } catch { /* ignore */ } delete peerConnections[uid]; }
+    const p = peerAudio.get(uid);
+    if (p) { try { p.el.srcObject = null; } catch { /* ignore */ } peerAudio.delete(uid); }
+}
+
+function voiceTeardown() {
+    voiceSend({ t: 'bye' });
+    if (socket) socket.emit('leave_voice', { room: voiceRoomName(), user_id: currentUser.id });
+    for (const uid of Object.keys(peerConnections)) dropPeer(uid);
+    if (localStream) { localStream.getTracks().forEach(t => { try { t.stop(); } catch { /* ignore */ } }); localStream = null; }
+    voiceRoster.clear();
+    if (voiceBeatTimer) { clearInterval(voiceBeatTimer); voiceBeatTimer = null; }
+    stopVoiceMeter();
+    micAnalyser = null; micData = null; selfTalking = false;
+}
+
+/* با بسته‌شدن صفحه از اتاق خارج شو، وگرنه بقیه تا مهلتِ تپش معطل می‌مانند */
+window.addEventListener('pagehide', () => { if (localStream) voiceTeardown(); });
+
+function voiceMicConstraints() {
+    const c = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+    const saved = localStorage.getItem('jvl_voice_mic');
+    if (saved) c.deviceId = { exact: saved };
+    return { audio: c };
+}
+
 async function toggleVoiceConnect() {
     const btn = document.getElementById('voiceConnectBtn');
     const orb = document.getElementById('voiceOrb');
     const eq = document.getElementById('voiceEq');
+    const muteBtn = document.getElementById('voiceMuteBtn');
+    const devs = document.getElementById('voiceDevices');
     if (localStream) {
-        localStream.getTracks().forEach(t => t.stop());
-        Object.values(peerConnections).forEach(pc => pc.close());
-        peerConnections = {};
-        localStream = null;
-        socket.emit('leave_voice', { room:'global_voice', user_id: currentUser.id });
+        voiceTeardown();
         orb.classList.remove('live'); eq.classList.remove('on');
-        btn.innerHTML = '<svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg> اتصال به ویس‌چت';
-        toast('اتصال ویس‌چت قطع شد', 'info');
-    } else {
-        try {
-            localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            socket.emit('join_voice', { room:'global_voice', user_id: currentUser.id });
-            orb.classList.add('live'); eq.classList.add('on');
-            btn.innerHTML = '<svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91"/><line x1="23" y1="1" x2="1" y2="23"/></svg> قطع اتصال';
-            toast('به ویس‌چت وصل شدی 🎙️', 'success');
-        } catch(e) { micFail(e); }
+        btn.textContent = 'اتصال به اتاق';
+        if (muteBtn) muteBtn.style.display = 'none';
+        if (devs) devs.style.display = 'none';
+        toast('از اتاق خارج شدی', 'info');
+        renderVoicePeers();
+        return;
     }
+    const room = voiceRoomName();
+    localStorage.setItem('jvl_voice_room', room);
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia(voiceMicConstraints());
+    } catch (e) { micFail(e); return; }
+    voiceMuted = false;
+    const m = attachAnalyser(localStream);
+    micAnalyser = m.analyser; micData = m.data;
+    socket.emit('join_voice', { room, user_id: currentUser.id });
+    orb.classList.add('live'); eq.classList.add('on');
+    btn.textContent = 'قطع اتصال و خروج';
+    if (muteBtn) { muteBtn.style.display = ''; muteBtn.textContent = '🎙️ بی‌صدا کردن میکروفون'; }
+    voiceAnnounce('hello');
+    /* اعلام حضور دوره‌ای: هم فهرست بقیه تازه می‌ماند، هم عضو مرده حذف می‌شود */
+    if (!voiceBeatTimer) voiceBeatTimer = setInterval(() => { voiceAnnounce('hello'); rosterPrune(); }, VOICE_BEAT_MS);
+    startVoiceMeter();
+    renderVoicePeers();
+    loadVoiceDevices();
+    toast(`به «${room}» وصل شدی 🎙️`, 'success');
 }
-function createPeerConnection(sender) {
-    const pc = new RTCPeerConnection({ iceServers: [{ urls:'stun:stun.l.google.com:19302' }] });
-    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-    pc.onicecandidate = e => {
-        if (e.candidate) socket.emit('voice_signal', { room:'global_voice', sender: currentUser.id, signal:{ candidate: e.candidate } });
+
+function toggleVoiceMute() {
+    if (!localStream) return;
+    voiceMuted = !voiceMuted;
+    localStream.getAudioTracks().forEach(t => { t.enabled = !voiceMuted; });
+    const btn = document.getElementById('voiceMuteBtn');
+    if (btn) btn.textContent = voiceMuted ? '🔇 روشن کردن میکروفون' : '🎙️ بی‌صدا کردن میکروفون';
+    voiceSend({ t: 'mute', muted: voiceMuted, name: currentUser.full_name });
+    paintVoiceDot('self');
+}
+
+/* ── انتخاب ورودی/خروجی صدا ── */
+async function loadVoiceDevices() {
+    const devs = document.getElementById('voiceDevices');
+    if (!devs || !navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+    let list = [];
+    try { list = await navigator.mediaDevices.enumerateDevices(); } catch { return; }
+    const fill = (sel, items, savedId) => {
+        if (!sel) return;
+        sel.innerHTML = items.map((d, i) =>
+            `<option value="${esc(d.deviceId)}"${d.deviceId === savedId ? ' selected' : ''}>${esc(d.label || (i === 0 ? 'پیش‌فرض' : 'دستگاه ' + (i + 1)))}</option>`).join('');
+        if (!items.length) sel.innerHTML = '<option value="">—</option>';
     };
+    fill(document.getElementById('voiceMicSel'), list.filter(d => d.kind === 'audioinput'), localStorage.getItem('jvl_voice_mic'));
+    fill(document.getElementById('voiceSpkSel'), list.filter(d => d.kind === 'audiooutput'), localStorage.getItem('jvl_voice_spk'));
+    devs.style.display = 'flex';
+}
+
+async function onMicDeviceChange() {
+    const sel = document.getElementById('voiceMicSel');
+    if (!sel || !sel.value || !localStream) return;
+    localStorage.setItem('jvl_voice_mic', sel.value);
+    let fresh;
+    try { fresh = await navigator.mediaDevices.getUserMedia(voiceMicConstraints()); }
+    catch (e) { micFail(e); return; }
+    const track = fresh.getAudioTracks()[0];
+    /* جای‌گزینی بی‌قطع: renegotiation لازم نیست */
+    for (const pc of Object.values(peerConnections)) {
+        const snd = pc.getSenders().find(s => s.track && s.track.kind === 'audio');
+        if (snd && snd.replaceTrack) { try { await snd.replaceTrack(track); } catch { /* ignore */ } }
+    }
+    localStream.getAudioTracks().forEach(t => { try { t.stop(); } catch { /* ignore */ } });
+    localStream.getAudioTracks().forEach(t => localStream.removeTrack(t));
+    localStream.addTrack(track);
+    const m = attachAnalyser(localStream);
+    micAnalyser = m.analyser; micData = m.data;
+    toast('میکروفون عوض شد', 'success');
+}
+
+async function onSpeakerDeviceChange() {
+    const sel = document.getElementById('voiceSpkSel');
+    if (!sel || !sel.value) return;
+    localStorage.setItem('jvl_voice_spk', sel.value);
+    for (const p of peerAudio.values()) await applySpeakerDevice(p.el);
+    toast('خروجی صدا عوض شد', 'success');
+}
+
+async function applySpeakerDevice(el) {
+    const id = localStorage.getItem('jvl_voice_spk');
+    /* setSinkId فقط در بعضی مرورگرها هست؛ نبودنش خطا نیست */
+    if (id && el && typeof el.setSinkId === 'function') { try { await el.setSinkId(id); } catch { /* ignore */ } }
+}
+
+/*
+ * چه کسی offer می‌دهد؟ در Mesh اگر هر دو طرف هم‌زمان offer بدهند glare می‌شود.
+ * قانون سبک و قطعی: هرکس شناسه‌اش کوچک‌تر است پیشنهاد می‌دهد.
+ */
+async function voiceOffer(uid) {
+    try {
+        const pc = peerConnections[uid] || createPeerConnection(uid);
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        voiceSendTo(uid, { sdp: pc.localDescription });
+    } catch (e) { console.warn('ساخت پیشنهاد ناموفق بود', e); }
+}
+
+function createPeerConnection(sender) {
+    /* قبلاً فقط یک STUN داشت؛ iceConfig() سه STUN و TURN اختیاری می‌دهد */
+    const pc = new RTCPeerConnection(iceConfig());
+    if (localStream) localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    pc.onicecandidate = e => { if (e.candidate) voiceSendTo(sender, { candidate: e.candidate }); };
     pc.ontrack = e => {
-        const audio = new Audio();
-        audio.srcObject = e.streams[0];
-        audio.autoplay = true;
-        audio.play().catch(() => {});
+        const stream = e.streams[0];
+        if (!stream) return;
+        const el = document.createElement('audio');
+        el.autoplay = true;
+        el.srcObject = stream;
+        applySpeakerDevice(el);
+        /* play() در بعضی محیط‌ها Promise برنمی‌گرداند؛ بی‌محابا .catch نزن */
+        const pr = el.play();
+        if (pr && typeof pr.catch === 'function') pr.catch(() => {});
+        const a = attachAnalyser(stream);
+        peerAudio.set(sender, { el, analyser: a.analyser, data: a.data, talking: false });
+        startVoiceMeter();
+    };
+    /* اتصال مجدد خودکار: اگر ICE شکست خورد، یک‌بار از نو مذاکره می‌کنیم */
+    pc.onconnectionstatechange = () => {
+        if (pc.connectionState !== 'failed' || !localStream || pc.__retried) return;
+        pc.__retried = true;
+        dropPeer(sender);
+        if (voiceRoster.has(sender) && Number(currentUser.id) < Number(sender)) voiceOffer(sender);
     };
     peerConnections[sender] = pc;
     return pc;
 }
 
 /* ═══════════ اکسپلور ═══════════ */
+/* ═══════════ رویدادها (کشف رویدادها) ═══════════ */
+let eventsCache = [];
+
+function loadEvents() {
+    const box = document.getElementById('eventsList');
+    if (!box) return;
+    apiFetch('/events').then(r => r.json()).then(list => {
+        eventsCache = Array.isArray(list) ? list : [];
+        renderEvents();
+    }).catch(() => { eventsCache = []; renderEvents(); });
+}
+
+/** «۲ ساعت دیگر» / «فردا ۱۸:۳۰» — چون زمانِ مطلق به‌تنهایی چیزی نمی‌گوید */
+function eventWhenLabel(startsAt, isPast) {
+    const t = new Date(String(startsAt).replace(' ', 'T')).getTime();
+    if (!Number.isFinite(t)) return startsAt;
+    const diff = t - Date.now();
+    const mins = Math.round(diff / 60000);
+    if (!isPast) {
+        if (mins < 60) return `${fa(Math.max(mins, 1))} دقیقه دیگر`;
+        if (mins < 60 * 24) return `${fa(Math.round(mins / 60))} ساعت دیگر`;
+        if (mins < 60 * 24 * 2) return `فردا ${faDateLabel(startsAt)}`;
+        if (mins < 60 * 24 * 7) return `${fa(Math.round(mins / 1440))} روز دیگر`;
+    }
+    return faDateLabel(startsAt);
+}
+
+function renderEvents() {
+    const box = document.getElementById('eventsList');
+    if (!box) return;
+    if (!eventsCache.length) {
+        box.innerHTML = '<div style="font-size:12px; color:var(--text-3); padding:10px 4px; line-height:2;">رویدادی نیست. اولین رویداد را تو بساز 🙂</div>';
+        return;
+    }
+    box.innerHTML = eventsCache.map(ev => {
+        const mine = ev.host_id == currentUser.id;
+        const going = ev.my_rsvp === 'going';
+        const maybe = ev.my_rsvp === 'maybe';
+        return `
+        <div class="admin-row" style="${ev.is_past ? 'opacity:.55;' : ''}">
+            <div style="min-width:0; flex:1;">
+                <div class="ar-name">${esc(ev.title)}${ev.is_public ? '' : ' <span style="font-size:10px; color:var(--text-3);">🔒 خصوصی</span>'}</div>
+                <div class="ar-sub" style="line-height:1.9;">
+                    ${ev.is_past ? 'برگزار شد · ' : ''}${esc(eventWhenLabel(ev.starts_at, ev.is_past))}
+                    ${ev.place ? ' · 📍 ' + esc(ev.place) : ''}
+                    <br>میزبان: ${esc(ev.host_name || '—')} · ${fa(ev.going_count)} می‌آیند${ev.maybe_count ? ' · ' + fa(ev.maybe_count) + ' شاید' : ''}
+                </div>
+            </div>
+            <div class="ar-actions" style="flex-direction:column; align-items:stretch; gap:5px;">
+                ${ev.is_past ? '' : `
+                    <div style="display:flex; gap:5px;">
+                        <button class="btn ${going ? '' : 'btn-ghost'}" style="padding:5px 10px; font-size:11px;" onclick="rsvpEvent(${ev.id}, '${going ? 'no' : 'going'}')">${going ? '✓ می‌آیم' : 'می‌آیم'}</button>
+                        <button class="btn ${maybe ? '' : 'btn-ghost'}" style="padding:5px 10px; font-size:11px;" onclick="rsvpEvent(${ev.id}, '${maybe ? 'no' : 'maybe'}')">${maybe ? '✓ شاید' : 'شاید'}</button>
+                    </div>`}
+                <div style="display:flex; gap:5px;">
+                    <button class="btn btn-ghost" style="padding:5px 10px; font-size:11px;" onclick="showEventRsvps(${ev.id})">حاضران</button>
+                    ${mine || currentUser.role === 'admin' ? `<button class="btn btn-ghost" style="padding:5px 10px; font-size:11px; color:var(--danger,#ef4444);" onclick="deleteEvent(${ev.id})">حذف</button>` : ''}
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function openNewEventModal() {
+    document.getElementById('evTitle').value = '';
+    document.getElementById('evPlace').value = '';
+    document.getElementById('evDesc').value = '';
+    document.getElementById('evPublic').checked = true;
+    /* یک ساعت از الان، گردِ رُند — چون ورودی خالی یعنی «الان»، که بی‌فایده است */
+    const d = new Date(Date.now() + 3600000);
+    d.setMinutes(0, 0, 0);
+    const p = x => String(x).padStart(2, '0');
+    document.getElementById('evStartsAt').value =
+        `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+    document.getElementById('newEventModal').classList.add('active');
+}
+
+function submitEvent() {
+    const title = document.getElementById('evTitle').value.trim();
+    if (!title) return toast('عنوان رویداد لازم است', 'error');
+    const startsAt = document.getElementById('evStartsAt').value;
+    if (!startsAt) return toast('زمان شروع را انتخاب کن', 'error');
+    apiFetch('/create_event', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            title, starts_at: startsAt,
+            place: document.getElementById('evPlace').value.trim(),
+            description: document.getElementById('evDesc').value.trim(),
+            is_public: document.getElementById('evPublic').checked
+        })
+    }).then(r => r.json()).then(res => {
+        if (!res.success) return toast(res.message || 'ساخت رویداد ناموفق بود', 'error');
+        closeModals(); toast('رویداد ساخته شد 📅', 'success'); loadEvents();
+    });
+}
+
+function rsvpEvent(id, status) {
+    apiFetch(`/event_rsvp/${id}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: status === 'no' ? '' : status })
+    }).then(r => r.json()).then(res => {
+        if (!res.success) return toast(res.message || 'ناموفق', 'error');
+        loadEvents();
+    });
+}
+
+function deleteEvent(id) {
+    uiConfirm('این رویداد برای همیشه حذف می‌شود. مطمئنی؟', () => {
+        apiFetch(`/event/${id}`, { method: 'DELETE' }).then(r => r.json()).then(res => {
+            toast(res.message || (res.success ? 'رویداد حذف شد' : 'ناموفق'), res.success ? 'success' : 'error');
+            loadEvents();
+        });
+    });
+}
+
+function showEventRsvps(id) {
+    apiFetch(`/event_rsvps/${id}`).then(r => r.json()).then(rows => {
+        const list = Array.isArray(rows) ? rows : [];
+        const text = list.length
+            ? list.map(u => `${u.full_name || u.username} — ${u.rsvp === 'going' ? 'می‌آید' : 'شاید'}`).join('\n')
+            : 'هنوز کسی جواب نداده.';
+        toast(text, 'info');
+    });
+}
+
 function loadExplore() {
     apiFetch('/stories').then(r => r.json()).then(stories => {
         storyCache = stories;
@@ -2057,7 +2754,7 @@ function renderStoriesBar() {
     ` + storyCache.map((s, i) => `
         <div style="display:flex; flex-direction:column; align-items:center;">
             <div class="story-ring ${s.viewed_by_me ? 'plain' : ''}" onclick="viewStoryById(${i})">
-                <div class="inner">${s.avatar ? `<img src="/files/profiles/${esc(s.avatar)}">` : `<div class="avatar" style="width:100%;height:100%;border:none;background:linear-gradient(135deg,#6366f1,#a855f7);font-size:21px;">${esc((s.full_name||'?')[0])}</div>`}</div>
+                <div class="inner">${s.avatar ? `<img src="${esc(mediaURL('profiles', s.avatar))}">` : `<div class="avatar" style="width:100%;height:100%;border:none;background:linear-gradient(135deg,#6366f1,#a855f7);font-size:21px;">${esc((s.full_name||'?')[0])}</div>`}</div>
             </div>
             <span class="story-label">${esc(s.full_name)}</span>
         </div>
@@ -2071,14 +2768,14 @@ function viewStoryById(i) {
     const fill = document.getElementById('storyProgress');
     document.getElementById('storyViewerName').textContent = story.full_name;
     const av = document.getElementById('storyViewerAvatar');
-    if (story.avatar) av.innerHTML = `<img src="/files/profiles/${esc(story.avatar)}">`;
+    if (story.avatar) av.innerHTML = `<img src="${esc(mediaURL('profiles', story.avatar))}">`;
     else av.innerHTML = `<div class="avatar" style="width:100%;height:100%;border:none;background:linear-gradient(135deg,#6366f1,#a855f7);">${esc((story.full_name||'?')[0])}</div>`;
     try {
         const exp = new Date(story.expires_at.replace(' ', 'T')) - new Date();
         document.getElementById('storyViewerExp').textContent = `تا ${fa(Math.max(0, Math.floor(exp / 3600000)))} ساعت دیگه`;
     } catch(e) { document.getElementById('storyViewerExp').textContent = '۲۴ ساعت اعتبار'; }
 
-    const url = `/files/stories/${encodeURIComponent(story.file_path)}`;
+    const url = mediaURL('stories', story.file_path);
     content.innerHTML = story.file_type === 'image' ? `<img src="${url}">` : `<video src="${url}" autoplay playsinline controls></video>`;
     modal.classList.add('active');
 
@@ -2173,7 +2870,7 @@ function renderPostList(list, emptyMsg) {
         card.style.animationDelay = `${Math.min(i * 0.05, 0.4)}s`;
         let media = '';
         if (p.file_path) {
-            const url = `/files/posts/${encodeURIComponent(p.file_path)}`;
+            const url = mediaURL('posts', p.file_path);
             if (p.file_type === 'image') media = `<div class="pc-media-wrap"><img class="pc-media" src="${url}" loading="lazy" ondblclick="doubleTapLike(${p.id}, this)"></div>`;
             else if (p.file_type === 'video') media = `<div class="pc-media-wrap"><video class="pc-media" src="${url}" controls playsinline preload="metadata" onplay="registerView(${p.id})"></video></div>`;
         }
@@ -2336,14 +3033,12 @@ function startChatWith(uid) {
 
 /* اعلان‌ها */
 function updateNotifBadge() {
-    ['notifBadge', 'notifBadgeM'].forEach(id => {
+    ['notifBadge'].forEach(id => {
         const b = document.getElementById(id);
         if (!b) return;
         if (notifUnread > 0) { b.style.display = 'flex'; b.textContent = fa(notifUnread); }
         else b.style.display = 'none';
     });
-    const dot = document.getElementById('fabNotifDot');
-    if (dot) dot.style.display = notifUnread > 0 ? 'block' : 'none';
 }
 function loadNotifications() {
     apiFetch(`/notifications/${currentUser.id}`).then(r => r.json()).then(res => {
@@ -2524,13 +3219,16 @@ function loadAdminStats() {
                 <div style="display:flex; align-items:center; gap:9px; min-width:0;">
                     ${avatarHTML(u, 34)}
                     <div style="min-width:0;">
-                        <div class="ar-name">${esc(u.full_name)} ${isAdmin ? '<span class="chip gold">👑 ادمین</span>' : ''} ${isSelf ? '<span class="chip">شما</span>' : ''}</div>
-                        <div class="ar-sub">@${esc(u.username)} · ${faDateLabel(u.created_at)}</div>
+                        <div class="ar-name">${esc(u.full_name)} ${isAdmin ? '<span class="chip gold">👑 ادمین</span>' : ''} ${u.banned ? '<span class="chip" style="background:rgba(239,68,68,.16); color:#f87171;">🚫 بن</span>' : ''} ${isSelf ? '<span class="chip">شما</span>' : ''}</div>
+                        <div class="ar-sub">@${esc(u.username)} · ${faDateLabel(u.created_at)}${u.last_ip ? ' · <span dir="ltr">' + esc(u.last_ip) + '</span>' : ' · <span style="opacity:.6;">IP ثبت نشده</span>'}</div>
                     </div>
                 </div>
                 <div class="ar-actions">
                     ${!isSelf && !isAdmin ? `<button class="btn btn-ghost" style="padding:5px 11px; font-size:11.5px;" onclick="promoteUser(${u.id})">ارتقا 👑</button>` : ''}
                     ${!isSelf && isAdmin ? `<button class="btn btn-ghost" style="padding:5px 11px; font-size:11.5px;" onclick="demoteUser(${u.id})">تنزل</button>` : ''}
+                    ${!isSelf ? (u.banned
+                        ? `<button class="btn btn-ghost" style="padding:5px 11px; font-size:11.5px; color:var(--success,#10b981);" onclick="unbanUser(${u.id})">رفع بن</button>`
+                        : `<button class="btn btn-ghost" style="padding:5px 11px; font-size:11.5px; color:var(--warning); " title="بن + بستن IP" onclick="banUser(${u.id})">🚫 بن</button>`) : ''}
                     ${!isSelf ? `<button class="btn btn-ghost" style="padding:5px 9px; font-size:11.5px; color:var(--danger);" onclick="deleteUser(${u.id})">حذف</button>` : ''}
                 </div>
             `;
@@ -2560,6 +3258,87 @@ function deleteUser(userId) {
         apiFetch(`/api/admin/delete_user/${userId}`, { method:'DELETE' }).then(() => { toast('کاربر حذف شد', 'success'); loadAdminStats(); loadUsers(); });
     });
 }
+/* ═══════════ بن‌کردن کاربر و نشانی ═══════════ */
+
+/**
+ * بنِ IP فقط در حالت سرور معنا دارد: در حالت MQTT/Pages هیچ سروری
+ * بین تو و بروکر عمومی نیست، پس IP کسی دیده نمی‌شود و بنِ نشانی ممکن نیست.
+ */
+function banUser(userId) {
+    const reason = prompt('دلیل بن (اختیاری):', '');
+    if (reason === null) return;   /* لغو */
+    const useCidr = confirm(
+        'نشانی IP کاربر هم بسته شود؟\n\n' +
+        '«باشه» = فقط همین یک IP\n' +
+        '«نه» = کل محدودهٔ /24 (قوی‌تر، چون IP موبایل با هر اتصال عوض می‌شود)\n\n' +
+        '⚠️ اگر پشت NAT مشترک هستید، /24 ممکن است خودت را هم بیرون بیندازد.'
+    );
+    apiFetch(`/api/admin/ban_user/${userId}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason, ban_ip: true, cidr: useCidr ? null : 24 })
+    }).then(r => r.json()).then(res => {
+        if (!res.success) return toast(res.message || 'بن ناموفق بود', 'error');
+        toast(res.message || 'کاربر مسدود شد', 'success');
+        if (res.ip_error) toast(res.ip_error, 'warning');
+        loadAdminStats();
+        loadBannedIps();
+    }).catch(() => toast('این کار فقط در حالت سرور ممکن است', 'error'));
+}
+
+function unbanUser(userId) {
+    const alsoIp = confirm('نشانی IP این کاربر هم باز شود؟');
+    apiFetch(`/api/admin/unban_user/${userId}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ unban_ip: alsoIp })
+    }).then(r => r.json()).then(res => {
+        toast(res.message || (res.success ? 'رفع بن شد' : 'ناموفق'), res.success ? 'success' : 'error');
+        loadAdminStats();
+        loadBannedIps();
+    }).catch(() => toast('این کار فقط در حالت سرور ممکن است', 'error'));
+}
+
+function banIpManual() {
+    const ip = (document.getElementById('manualBanIp').value || '').trim();
+    if (!ip) return toast('نشانی را بنویس', 'error');
+    apiFetch('/api/admin/ban_ip', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip })
+    }).then(r => r.json()).then(res => {
+        toast(res.message || (res.success ? 'بسته شد' : 'ناموفق'), res.success ? 'success' : 'error');
+        if (res.success) document.getElementById('manualBanIp').value = '';
+        loadBannedIps();
+    }).catch(() => toast('این کار فقط در حالت سرور ممکن است', 'error'));
+}
+
+function unbanIp(ip) {
+    apiFetch('/api/admin/unban_ip/' + encodeURIComponent(ip), { method: 'DELETE' })
+        .then(r => r.json()).then(res => {
+            toast(res.message || (res.success ? 'باز شد' : 'ناموفق'), res.success ? 'success' : 'error');
+            loadBannedIps();
+        });
+}
+
+function loadBannedIps() {
+    const box = document.getElementById('bannedIpsList');
+    if (!box) return;
+    apiFetch('/api/admin/banned_ips').then(r => r.json()).then(rows => {
+        if (!Array.isArray(rows) || !rows.length) {
+            box.innerHTML = '<div class="cc-hint" style="font-size:11.5px; color:var(--text-3);">نشانی مسدودی نیست.</div>';
+            return;
+        }
+        box.innerHTML = rows.map(r => `
+            <div class="admin-row">
+                <div style="min-width:0;">
+                    <div class="ar-name" dir="ltr" style="font-family:monospace;">${esc(r.ip)}</div>
+                    <div class="ar-sub">${esc(r.reason || 'بدون دلیل')}${r.banned_by_name ? ' · توسط ' + esc(r.banned_by_name) : ''} · ${faDateLabel(r.created_at)}</div>
+                </div>
+                <div class="ar-actions">
+                    <button class="btn btn-ghost" style="padding:5px 11px; font-size:11.5px; color:var(--success,#10b981);" onclick="unbanIp('${esc(r.ip)}')">باز کردن</button>
+                </div>
+            </div>`).join('');
+    }).catch(() => { box.innerHTML = ''; });
+}
+
 function promoteUser(userId) {
     uiConfirm('این کاربر به ادمین ارتقا پیدا می‌کنه. ادامه بدم؟', () => {
         apiFetch(`/api/admin/promote_user/${userId}`, { method:'POST' }).then(() => { toast('کاربر ارتقا یافت 👑', 'success'); loadAdminStats(); });
@@ -2629,17 +3408,21 @@ const TAB_META = {
     admin:   { title:'مدیریت',   sub:'پنل کنترل سرور' },
     profile: { title:'پروفایل',  sub:'حساب کاربری تو' }
 };
-function toggleDrawer() {
-    const d = document.getElementById('navDrawer');
-    d.classList.toggle('open');
-    document.getElementById('drawerOverlay').classList.toggle('open', d.classList.contains('open'));
+/* قرص پیشرفت انتقال رسانه (ارسال و دریافت تکه‌ها) */
+let xferHideTimer = null;
+function xferProgress(label, sent, total) {
+    const pill = document.getElementById('xferPill');
+    if (!pill) return;
+    const pct = total > 0 ? Math.min(100, Math.round((sent / total) * 100)) : 0;
+    document.getElementById('xferLabel').textContent = label;
+    document.getElementById('xferBar').style.width = pct + '%';
+    document.getElementById('xferPct').textContent = fa(pct) + '٪';
+    pill.classList.add('on');
+    clearTimeout(xferHideTimer);
+    if (pct >= 100) xferHideTimer = setTimeout(() => pill.classList.remove('on'), 1400);
 }
-function closeDrawer() {
-    document.getElementById('navDrawer').classList.remove('open');
-    document.getElementById('drawerOverlay').classList.remove('open');
-}
+
 function switchTab(tab, el) {
-    if (window.innerWidth <= 900) closeDrawer();
     document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.querySelectorAll(`.nav-item[data-tab="${tab}"]`).forEach(b => b.classList.add('active'));
@@ -2647,11 +3430,16 @@ function switchTab(tab, el) {
     const meta = TAB_META[tab] || { title: tab, sub: '' };
     document.getElementById('tbTitle').textContent = meta.title;
     document.getElementById('tbSub').textContent = meta.sub;
-    if (tab === 'explore') loadExplore();
+    if (tab === 'explore') { loadExplore(); loadEvents(); }
     if (tab === 'lan') loadLanHosts();
-    if (tab === 'admin') loadAdminStats();
-    if (tab === 'voice') renderVoicePeers();
+    if (tab === 'admin') { loadAdminStats(); loadBannedIps(); }
+    if (tab === 'voice') {
+        const ri = document.getElementById('voiceRoomInput');
+        if (ri && !ri.value) ri.value = localStorage.getItem('jvl_voice_room') || 'اتاق اصلی';
+        renderVoicePeers();
+    }
     if (tab === 'chat') { loadUsers(); loadGroups(); }
+    if (tab === 'profile') refreshNotifUI();
 }
 function openLanModal() { document.getElementById('lanModal').classList.add('active'); }
 function openStoryModal() { document.getElementById('newStoryModal').classList.add('active'); }
@@ -2667,6 +3455,1017 @@ function logout() {
 }
 
 /* شروع */
+
+/* ═══════════ تماس WebRTC (سیگنال روی MQTT، رسانه P2P) ═══════════ */
+let callPC = null, callStream = null, callPeer = null, callId = null;
+let callIsVideo = false, callIsCaller = false, callStartedAt = 0, callTimerId = null;
+let incomingCall = null, ringTimer = null, ringCtx = null, callRingTimeout = null;
+let camEnabled = false, micMuted = false, speakerOn = false;
+
+/** سرورهای ICE؛ TURN اختیاری را می‌شود در localStorage گذاشت (jvl_turn) */
+function iceConfig() {
+    const servers = [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun.cloudflare.com:3478' }
+    ];
+    try {
+        const raw = localStorage.getItem('jvl_turn');
+        if (raw) {
+            const t = JSON.parse(raw);
+            servers.push({ urls: t.urls, username: t.username || '', credential: t.credential || '' });
+        }
+    } catch (e) { /* TURN نامعتبر نادیده گرفته می‌شود */ }
+    return { iceServers: servers };
+}
+
+function callLabel() { return callPeer ? (callPeer.full_name || callPeer.username || 'کاربر') : '—'; }
+
+function setCallState(txt) { const el = document.getElementById('callState'); if (el) el.textContent = txt; }
+
+function renderCallAvatar() {
+    const el = document.getElementById('callAvatar');
+    if (el && callPeer) el.innerHTML = avatarHTML(callPeer, 96).replace(/^<div class="avatar"[^>]*>/, '').replace(/<\/div>$/, '');
+}
+
+/* بوق تماس با WebAudio — بدون هیچ فایل صوتی */
+function startRing(pattern) {
+    stopRing();
+    try {
+        ringCtx = ringCtx || new (window.AudioContext || window.webkitAudioContext)();
+        if (ringCtx.state === 'suspended') ringCtx.resume();
+        const beep = () => {
+            if (!ringCtx) return;
+            for (let i = 0; i < pattern.length; i++) {
+                const osc = ringCtx.createOscillator(), g = ringCtx.createGain();
+                osc.frequency.value = pattern[i];
+                osc.type = 'sine';
+                const t0 = ringCtx.currentTime + i * 0.22;
+                g.gain.setValueAtTime(0.0001, t0);
+                g.gain.exponentialRampToValueAtTime(0.16, t0 + 0.03);
+                g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.19);
+                osc.connect(g); g.connect(ringCtx.destination);
+                osc.start(t0); osc.stop(t0 + 0.2);
+            }
+        };
+        beep();
+        ringTimer = setInterval(beep, 1800);
+    } catch (e) { /* بدون صدا هم تماس کار می‌کند */ }
+}
+function stopRing() { if (ringTimer) { clearInterval(ringTimer); ringTimer = null; } }
+
+function startCall(withVideo) {
+    if (!selectedUserId) { toast('اول یک گفتگو را باز کن', 'error'); return; }
+    if (selectedGroupId) { toast('تماس یک‌به‌یک فقط در گفتگوی خصوصی', 'error'); return; }
+    const u = allUsersCache.find(x => x.id === selectedUserId);
+    if (!u) { toast('کاربر پیدا نشد', 'error'); return; }
+    if (u.is_online === false) { toast(`${u.full_name} الان آفلاین است`, 'warning'); return; }
+    beginCall(u, withVideo, true);
+    socket.emit('call_offer', { to: u.id, callId: callId, video: withVideo });
+    startRing([660]);
+    setCallState('در حال تماس…');
+    /* اگر تا ۴۵ ثانیه پاسخ نیامد، خودکار قطع شود */
+    callRingTimeout = setTimeout(() => { if (callPeer && !callStartedAt) endCall('پاسخی داده نشد'); }, 45000);
+}
+
+async function beginCall(peer, withVideo, isCaller) {
+    callPeer = peer; callIsVideo = !!withVideo; callIsCaller = !!isCaller;
+    callId = Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    callStartedAt = 0; micMuted = false; speakerOn = false; camEnabled = !!withVideo;
+
+    const ov = document.getElementById('callOverlay');
+    ov.classList.toggle('audio-only', !withVideo);
+    ov.classList.toggle('video-on', !!withVideo);
+    ov.classList.add('on');
+    document.getElementById('callName').textContent = callLabel();
+    renderCallAvatar();
+    setCallState(isCaller ? 'در حال تماس…' : 'در حال اتصال…');
+
+    try {
+        callStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: !!withVideo });
+    } catch (e) {
+        toast('دسترسی به میکروفون' + (withVideo ? ' و دوربین' : '') + ' داده نشد', 'error');
+        cleanupCall();
+        return;
+    }
+    const lv = document.getElementById('localVideo');
+    lv.srcObject = callStream;
+
+    callPC = new RTCPeerConnection(iceConfig());
+    callStream.getTracks().forEach(t => callPC.addTrack(t, callStream));
+    callPC.ontrack = (ev) => {
+        const rv = document.getElementById('remoteVideo');
+        rv.srcObject = ev.streams[0];
+        if (!callStartedAt) { callStartedAt = Date.now(); runCallTimer(); setCallState('متصل شد'); stopRing(); }
+    };
+    callPC.onicecandidate = (ev) => {
+        if (ev.candidate && socket) socket.emit('call_signal', { to: callPeer.id, callId, ice: ev.candidate });
+    };
+    callPC.onconnectionstatechange = () => {
+        const st = callPC && callPC.connectionState;
+        if (st === 'failed') { setCallState('اتصال برقرار نشد'); }
+        if (st === 'disconnected' && callStartedAt) setCallState('قطع شد…');
+    };
+}
+
+function runCallTimer() {
+    if (callTimerId) clearInterval(callTimerId);
+    callTimerId = setInterval(() => {
+        const s = Math.max(0, Math.floor((Date.now() - callStartedAt) / 1000));
+        setCallState(`${fa(String(Math.floor(s / 60)).padStart(2, '0'))}:${fa(String(s % 60).padStart(2, '0'))}`);
+    }, 500);
+}
+
+async function answerCall() {
+    if (!incomingCall) return;
+    const data = incomingCall;
+    document.getElementById('callIncoming').classList.remove('on');
+    stopRing();
+    incomingCall = null;
+    const u = allUsersCache.find(x => x.id === data.from) || { id: data.from, full_name: data.fromName, username: '' };
+    await beginCall(u, data.video, false);
+    if (!callPC) return;
+    socket.emit('call_accept', { to: data.from, callId: data.callId });
+    setCallState('در حال اتصال…');
+}
+
+function rejectCall() {
+    if (!incomingCall) return;
+    socket.emit('call_reject', { to: incomingCall.from, callId: incomingCall.callId });
+    incomingCall = null;
+    document.getElementById('callIncoming').classList.remove('on');
+    stopRing();
+}
+
+async function endCall(reason) {
+    if (callPeer && socket) socket.emit('call_end', { to: callPeer.id, callId, reason: reason || '' });
+    if (reason) toast(reason, 'warning');
+    cleanupCall();
+}
+
+function cleanupCall() {
+    stopRing();
+    if (callRingTimeout) { clearTimeout(callRingTimeout); callRingTimeout = null; }
+    if (callTimerId) { clearInterval(callTimerId); callTimerId = null; }
+    try { if (callPC) callPC.close(); } catch (e) { /* ignore */ }
+    if (callStream) callStream.getTracks().forEach(t => { try { t.stop(); } catch (e) { /* ignore */ } });
+    callPC = null; callStream = null; callPeer = null; callId = null; callStartedAt = 0;
+    const rv = document.getElementById('remoteVideo'), lv = document.getElementById('localVideo');
+    if (rv) rv.srcObject = null;
+    if (lv) lv.srcObject = null;
+    document.getElementById('callOverlay').classList.remove('on', 'video-on');
+    document.getElementById('callIncoming').classList.remove('on');
+}
+
+function toggleMute() {
+    if (!callStream) return;
+    micMuted = !micMuted;
+    callStream.getAudioTracks().forEach(t => { t.enabled = !micMuted; });
+    document.getElementById('btnMute').classList.toggle('off', micMuted);
+}
+function toggleCam() {
+    if (!callStream) return;
+    const tracks = callStream.getVideoTracks();
+    if (!tracks.length) { toast('این تماس تصویری نیست', 'warning'); return; }
+    camEnabled = !camEnabled;
+    tracks.forEach(t => { t.enabled = camEnabled; });
+    document.getElementById('btnCam').classList.toggle('off', !camEnabled);
+    document.getElementById('callOverlay').classList.toggle('video-on', camEnabled && callIsVideo);
+}
+function toggleSpeaker() {
+    speakerOn = !speakerOn;
+    const rv = document.getElementById('remoteVideo');
+    if (rv) rv.style.opacity = speakerOn ? '1' : '1';
+    document.getElementById('btnSpk').classList.toggle('off', speakerOn);
+    toast(speakerOn ? 'بلندگو روشن شد' : 'بلندگو خاموش شد');
+}
+
+/** هندلرهای سیگنال — در connectSocket ثبت می‌شوند */
+function bindCallSignals(socket) {
+    socket.on('call_offer', async (d) => {
+        if (incomingCall || callPeer) { socket.emit('call_reject', { to: d.from, callId: d.callId, reason: 'busy' }); return; }
+        incomingCall = d;
+        const u = allUsersCache.find(x => x.id === d.from) || { id: d.from, full_name: d.fromName, username: '', avatar: null };
+        document.getElementById('ciName').textContent = u.full_name || d.fromName || 'تماس ورودی';
+        document.getElementById('ciSub').textContent = d.video ? 'تماس تصویری ورودی' : 'تماس صوتی ورودی';
+        document.getElementById('ciAvatar').innerHTML = avatarHTML(u, 78).replace(/^<div class="avatar"[^>]*>/, '').replace(/<\/div>$/, '');
+        document.getElementById('callIncoming').classList.add('on');
+        startRing([880, 660]);
+        notifyIncomingCall(d);
+        /* زنگ خوردن طولانی نشود */
+        setTimeout(() => { if (incomingCall && incomingCall.callId === d.callId) rejectCall(); }, 45000);
+    });
+    socket.on('call_accept', async (d) => {
+        if (!callPC || !callIsCaller) return;
+        if (callRingTimeout) { clearTimeout(callRingTimeout); callRingTimeout = null; }
+        stopRing();
+        setCallState('طرف مقابل پاسخ داد…');
+        const offer = await callPC.createOffer();
+        await callPC.setLocalDescription(offer);
+        socket.emit('call_signal', { to: d.from, callId: d.callId, sdp: callPC.localDescription });
+    });
+    socket.on('call_signal', async (d) => {
+        if (!callPC) return;
+        try {
+            if (d.sdp && d.sdp.type === 'offer') {
+                await callPC.setRemoteDescription(d.sdp);
+                const ans = await callPC.createAnswer();
+                await callPC.setLocalDescription(ans);
+                socket.emit('call_signal', { to: callPeer.id, callId, sdp: callPC.localDescription });
+            } else if (d.sdp && d.sdp.type === 'answer') {
+                await callPC.setRemoteDescription(d.sdp);
+            } else if (d.ice) {
+                await callPC.addIceCandidate(d.ice);
+            }
+        } catch (e) { /* نامزد یخ دیرهنگام — نادیده */ }
+    });
+    socket.on('call_reject', (d) => {
+        if (!callPeer) return;
+        cleanupCall();
+        toast(d.reason === 'busy' ? `${callLabelBusy(d)} مشغول است` : 'تماس رد شد', 'warning');
+    });
+    socket.on('call_end', () => { cleanupCall(); });
+}
+function callLabelBusy(d) { const u = allUsersCache.find(x => x.id === d.from); return u ? u.full_name : 'طرف مقابل'; }
+
+
+/* ═══════════ همسان‌سازی مخاطبین ═══════════ */
+
+/** از فهرست مخاطبین مستقیم به گفتگو می‌رود */
+function openChatWith(id) {
+    const u = allUsersCache.find(x => x.id === id);
+    if (!u) { toast('اول یک بار فهرست کاربران را ببین', 'warning'); return; }
+    switchTab('chat', document.querySelector('[data-tab="chat"]'));
+    selectUser(u);
+}
+
+async function saveMyPhone() {
+    const v = (document.getElementById('myPhoneInput').value || '').trim();
+    if (!v) { toast('شماره را وارد کن', 'error'); return; }
+    const r = await apiFetch('/set_phone', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone: v }) });
+    const res = await r.json();
+    toast(res.success ? 'شمارهٔ تو ثبت شد ✅ حالا مخاطبینت پیدایت می‌کنند' : res.message, res.success ? 'success' : 'error');
+}
+
+function toggleManualPhones() {
+    const t = document.getElementById('manualPhones');
+    t.style.display = t.style.display === 'none' ? 'block' : 'none';
+    if (t.style.display === 'block') t.focus();
+}
+
+/**
+ * خواندن مخاطبین گوشی. دو مسیر به ترتیب تلاش می‌شود:
+ *  ۱) Contact Picker API کروم اندروید (navigator.contacts)
+ *  ۲) فایل vcf یا ورود دستی
+ */
+async function readDeviceContacts() {
+    try {
+        if (navigator.contacts && navigator.contacts.select) {
+            const picked = await navigator.contacts.select(['name', 'tel'], { multiple: true });
+            return picked.map(c => ({ name: c.name || '', tel: (c.tel && c.tel[0]) || '' }));
+        }
+    } catch (e) {
+        if (e && e.name === 'AbortError') return [];
+    }
+    return null;
+}
+
+/* ──────────────── واردکردن فایل vcf (vCard) ────────────────
+ *
+ * چرا پارسر دست‌نویس؟ چون خروجی واقعی گوشی‌ها سه نسخهٔ مختلف vCard می‌دهد و
+ * نام‌های فارسی معمولاً با QUOTED-PRINTABLE کد می‌شوند:
+ *   FN;ENCODING=QUOTED-PRINTABLE;CHARSET=UTF-8:=D8=B3=D8=A7=D8=B1=D8=A7=
+ *    =D8=AE=D8=A7=D9=86=D9=85
+ * اگر این‌ها را درست باز نکنیم، به‌جای «سارا خانم» یک مشت علامت سؤال می‌بینیم.
+ */
+
+/**
+ * خط‌های فیزیکی را به خط‌های منطقی تبدیل می‌کند.
+ * دو جور شکست وجود دارد و با هم فرق دارند:
+ *   • folding معمولی (RFC 6350): خط بعد با فاصله/تب شروع می‌شود و آن یک
+ *     کاراکتر حذف می‌شود.
+ *   • soft break در QUOTED-PRINTABLE: خط با «=» تمام می‌شود؛ هم «=» و هم
+ *     شکست خط حذف می‌شوند (وگرنه وسط کد، یک «=» اضافه جا می‌ماند).
+ */
+function vcfLogicalLines(raw) {
+    const physical = String(raw).split(/\r\n|\r|\n/);
+    const out = [];
+    let qpPending = false;
+    for (const line of physical) {
+        const folded = /^[ \t]/.test(line);
+        if (out.length && (qpPending || folded)) {
+            const prev = out[out.length - 1];
+            out[out.length - 1] = qpPending
+                ? prev.replace(/=\s*$/, '') + line.replace(/^[ \t]+/, '')
+                : prev + line.slice(1);
+        } else {
+            out.push(line);
+        }
+        const last = out[out.length - 1];
+        qpPending = /quoted-printable/i.test(last) && /=\s*$/.test(last);
+    }
+    return out;
+}
+
+/** =XX → بایت، بعد UTF-8. برای =0D=0A هم خروجی درست می‌دهد */
+function decodeQuotedPrintable(text) {
+    const bytes = [];
+    for (let i = 0; i < text.length; i++) {
+        if (text[i] === '=' && /^[0-9A-Fa-f]{2}$/.test(text.substr(i + 1, 2))) {
+            bytes.push(parseInt(text.substr(i + 1, 2), 16));
+            i += 2;
+        } else {
+            bytes.push(text.charCodeAt(i) & 0xFF);
+        }
+    }
+    try { return new TextDecoder('utf-8').decode(new Uint8Array(bytes)); }
+    catch { return text.replace(/=[0-9A-Fa-f]{2}/g, ''); }
+}
+
+function decodeBase64Text(text) {
+    try {
+        const bin = atob(String(text).replace(/\s+/g, ''));
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return new TextDecoder('utf-8').decode(bytes);
+    } catch { return ''; }
+}
+
+/** \, \; \n \\ → کاراکتر واقعی */
+function vcfUnescape(text) {
+    return String(text)
+        .replace(/\\([nN])/g, '\n')
+        .replace(/\\,/g, ',')
+        .replace(/\\;/g, ';')
+        .replace(/\\\\/g, '\\');
+}
+
+/** «NAME;PARAM=VAL;BARE:value» → {name, params, value} با رعایت کوتیشن */
+function vcfParseLine(line) {
+    let i = 0;
+    while (i < line.length && line[i] !== ';' && line[i] !== ':') i++;
+    const name = line.slice(0, i).toUpperCase();
+    const params = [];
+    while (i < line.length && line[i] === ';') {
+        i++;
+        const start = i;
+        let inQuote = false;
+        while (i < line.length) {
+            const ch = line[i];
+            if (ch === '"') inQuote = !inQuote;
+            else if (!inQuote && (ch === ';' || ch === ':')) break;
+            i++;
+        }
+        params.push(line.slice(start, i));
+    }
+    const value = line[i] === ':' ? line.slice(i + 1) : '';
+    return { name, params, value };
+}
+
+/** مقدار یک خاصیت را بر اساس ENCODING/CHARSET باز می‌کند */
+function vcfDecodeValue(params, value) {
+    const joined = params.join(';').toLowerCase();
+    if (/(^|;)encoding=(quoted-printable|b|base64)/.test(joined) || /;b$/.test(joined)) {
+        if (/quoted-printable/.test(joined)) return decodeQuotedPrintable(value);
+        return decodeBase64Text(value);
+    }
+    return value;
+}
+
+/**
+ * متن vcf → [{ name, tels:[…] }]
+ * نام از FN می‌آید و اگر نبود از N (و در نهایت ORG) ساخته می‌شود.
+ */
+function parseVCF(text) {
+    const lines = vcfLogicalLines(text);
+    const cards = [];
+    let card = null;
+
+    for (const raw of lines) {
+        if (!raw || !raw.trim()) continue;
+        const upper = raw.toUpperCase();
+        if (upper.startsWith('BEGIN:VCARD')) { card = { name: '', tels: [], org: '' }; continue; }
+        if (upper.startsWith('END:VCARD')) { if (card) cards.push(card); card = null; continue; }
+        if (!card) continue;
+        /* PHOTO می‌تواند چندصد کیلوبایت base64 باشد؛ اصلاً دستش نمی‌زنیم */
+        if (upper.indexOf('PHOTO') === 0 || upper.indexOf('LOGO') === 0) continue;
+
+        const { name, params, value } = vcfParseLine(raw);
+        const decoded = vcfUnescape(vcfDecodeValue(params, value)).trim();
+
+        if (name === 'FN') {
+            if (decoded) card.name = decoded;
+        } else if (name === 'N') {
+            /* N:Last;First;Middle;Prefix;Suffix — فارسی: اول نام، بعد نام‌خانوادگی */
+            const p = decoded.split(';');
+            const built = [p[3], p[1], p[2], p[0], p[4]].filter(x => x && x.trim()).join(' ').trim();
+            if (built && !card.name) card.name = built;
+        } else if (name === 'ORG') {
+            if (decoded && !card.org) card.org = decoded.split(';')[0];
+        } else if (name === 'TEL' || name === 'TEL;') {
+            const tel = decoded.replace(/^tel:/i, '').trim();
+            if (tel && card.tels.indexOf(tel) < 0) card.tels.push(tel);
+        }
+    }
+
+    /* کارت‌های بدون شماره به درد همسان‌سازی نمی‌خورند */
+    return cards
+        .map(c => ({ name: (c.name || c.org || '').trim(), tels: c.tels }))
+        .filter(c => c.tels.length);
+}
+
+/** شمارهٔ یک مخاطب vcf را با کش محلی پلتفرم مقایسه می‌کند و نام را نگه می‌دارد */
+async function importVCF(input) {
+    const file = input && input.files && input.files[0];
+    if (!file) return;
+    const box = document.getElementById('contactsResult');
+    let text;
+    try { text = await file.text(); }
+    catch { toast('خواندن فایل ناموفق بود', 'error'); return; }
+    finally { if (input) input.value = ''; }
+
+    const cards = parseVCF(text);
+    if (!cards.length) {
+        toast('هیچ مخاطب دارای شماره‌ای در این فایل نبود', 'warning');
+        return;
+    }
+    /* یک مخاطب ممکن است چند شماره داشته باشد؛ همه را با همان نام می‌فرستیم */
+    const list = [];
+    for (const c of cards) for (const tel of c.tels) list.push({ name: c.name, tel });
+
+    toast(`${fa(cards.length)} مخاطب از فایل خوانده شد`, 'success');
+    if (box) box.innerHTML = `<div class="cc-hint">در حال مقایسهٔ ${fa(list.length)} شماره…</div>`;
+    await lookupPhones(list);
+}
+
+async function syncContacts() {
+    const list = await readDeviceContacts();
+    if (!list) {
+        toast('این مرورگر دسترسی مستقیم به مخاطبین ندارد — دستی وارد کن', 'warning');
+        const t = document.getElementById('manualPhones');
+        t.style.display = 'block'; t.focus();
+        return;
+    }
+    if (!list.length) { toast('مخاطبی انتخاب نشد', 'warning'); return; }
+    await lookupPhones(list);
+}
+
+async function lookupManualPhones() {
+    const lines = (document.getElementById('manualPhones').value || '').split('\n').map(x => x.trim()).filter(Boolean);
+    if (!lines.length) { document.getElementById('contactsResult').innerHTML = ''; return; }
+    await lookupPhones(lines.map(tel => ({ name: '', tel })));
+}
+
+/**
+ * دفترچهٔ مخاطبین وارد‌شده، با نام‌های دفترچهٔ تلفن.
+ * فقط روی همین دستگاه نگه داشته می‌شود: نگاشت «نام → شماره» حریم خصوصی
+ * خودِ کاربر است و هرگز روی شبکه منتشر نمی‌شود (روی سیم فقط هش می‌رود).
+ */
+const CONTACTS_KEY = 'jvl_contacts';
+
+function savedContacts() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(CONTACTS_KEY) || '[]');
+        return Array.isArray(raw) ? raw : [];
+    } catch { return []; }
+}
+
+function saveImportedContacts(rows) {
+    const map = new Map(savedContacts().map(c => [String(c.id), c]));
+    for (const r of rows) {
+        if (!r || !r.id) continue;
+        map.set(String(r.id), {
+            id: r.id, username: r.username, full_name: r.full_name,
+            local_name: r.local_name || '', hash: r.hash || '', at: Date.now()
+        });
+    }
+    try { localStorage.setItem(CONTACTS_KEY, JSON.stringify([...map.values()])); } catch { /* پر بود */ }
+}
+
+function clearImportedContacts() {
+    localStorage.removeItem(CONTACTS_KEY);
+    const box = document.getElementById('contactsResult');
+    if (box) box.innerHTML = '';
+    renderSideList();
+    toast('مخاطبین واردشده پاک شدند', 'info');
+}
+
+/** نامی که خودِ کاربر در گوشی‌اش روی این مخاطب گذاشته */
+function localNameFor(userId) {
+    const c = savedContacts().find(x => String(x.id) === String(userId));
+    return (c && c.local_name) || '';
+}
+
+/** هش‌کردن و مقایسه کاملاً سمت خودِ دستگاه انجام می‌شود */
+async function lookupPhones(list) {
+    const box = document.getElementById('contactsResult');
+    const entries = (list || []).filter(c => c && c.tel);
+    box.innerHTML = `<div class="cc-hint">در حال مقایسهٔ ${fa(entries.length)} شماره…</div>`;
+
+    /*
+     * هش هر شماره را می‌گیریم تا بتوانیم نامِ دفترچهٔ تلفن را به کاربری که
+     * پلتفرم پیدا می‌کند گره بزنیم. فقط برای شماره‌هایی که نام دارند.
+     */
+    const nameByHash = {};
+    const named = entries.filter(c => c.name);
+    const seenTel = new Set();
+    const jobs = [];
+    for (const c of named) {
+        if (seenTel.has(c.tel)) continue;
+        seenTel.add(c.tel);
+        jobs.push(
+            apiFetch('/phone_hash', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: c.tel })
+            }).then(r => r.json()).then(h => {
+                if (h && h.hash && !nameByHash[h.hash]) nameByHash[h.hash] = c.name;
+            }).catch(() => {})
+        );
+    }
+    await Promise.all(jobs);
+
+    const res = await apiFetch('/contacts_lookup', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hashes: entries.map(c => c.tel) })
+    }).then(r => r.json());
+    const found = (res.matches || []).map(u => Object.assign({}, u, { local_name: nameByHash[u.hash] || '' }));
+    saveImportedContacts(found);
+    if (!found.length) {
+        box.innerHTML = `<div class="cc-hint">هیچ‌کدام از این ${fa(res.checked || list.length)} شماره روی پلتفرم نیستند.
+            <br>به دوستانت بگو شماره‌شان را اینجا ثبت کنند.</div>`;
+        return;
+    }
+    box.innerHTML = found.map(u => `
+        <div class="contact-row">
+            ${avatarHTML(u, 38)}
+            <div class="cr-tx">
+                <div class="cr-name">${esc(u.local_name || u.full_name || u.username)}</div>
+                <div class="cr-sub">@${esc(u.username)} · ${u.is_online ? 'آنلاین' : 'آفلاین'}${u.local_name && u.full_name && u.local_name !== u.full_name ? ' · در پلتفرم: ' + esc(u.full_name) : ''}</div>
+            </div>
+            <button class="icon-btn sm" title="گفتگو" onclick="openChatWith(${u.id})">
+                <svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            </button>
+        </div>`).join('');
+}
+
+/* ═══════════════ کانال (Broadcasting) ═══════════════ */
+let channelsCache = [];
+let selectedChannelId = null;
+let channelFile = null;
+
+function closeChannelPane() {
+    selectedChannelId = null;
+    const pane = document.getElementById('channelPane');
+    if (pane) pane.style.display = 'none';
+    const comp = document.getElementById('channelComposer');
+    if (comp) comp.style.display = 'none';
+    const msgs = document.getElementById('messagesContainer');
+    if (msgs) msgs.style.display = '';
+}
+
+function loadChannels() {
+    apiFetch('/channels').then(r => r.json()).then(list => {
+        channelsCache = Array.isArray(list) ? list : [];
+        if (sideList === 'channels') renderSideList();
+    }).catch(() => {});
+}
+
+function selectChannel(c) {
+    selectedChannelId = c.id;
+    selectedUserId = null;
+    selectedGroupId = null;
+    selectedChatObj = c;
+    /* ناحیهٔ پیام‌ها را می‌بندیم و پنل کانال را باز می‌کنیم */
+    document.getElementById('msgsList').innerHTML = '';
+    document.getElementById('messagesContainer').style.display = '';
+    document.getElementById('channelPane').style.display = '';
+    document.getElementById('chatInputArea').style.display = 'none';
+    document.getElementById('chatEmpty') && (document.getElementById('chatEmpty').style.display = 'none');
+    document.getElementById('chatLayout').classList.add('chat-open');
+
+    document.getElementById('chatHeaderName').textContent = '📢 ' + c.name;
+    document.getElementById('chatHeaderAvatar').outerHTML =
+        avatarHTML({ id: c.id + 2000, full_name: c.name }, 36).replace('class="avatar"', 'class="avatar" id="chatHeaderAvatar"');
+    const st = document.getElementById('chatHeaderStatus');
+    st.textContent = fa(c.subscribers || 0) + ' مشترک';
+    st.classList.remove('on');
+    /* دکمه‌های تماس برای کانال معنا ندارند */
+    const ba = document.getElementById('btnCallAudio'), bv = document.getElementById('btnCallVideo');
+    if (ba) ba.style.display = 'none';
+    if (bv) bv.style.display = 'none';
+
+    document.getElementById('chHeroAv').innerHTML = avatarHTML({ id: c.id + 2000, full_name: c.name }, 62);
+    document.getElementById('chHeroName').textContent = c.name;
+    document.getElementById('chHeroBio').textContent = c.bio || '';
+    document.getElementById('chHeroMeta').textContent =
+        fa(c.subscribers || 0) + ' مشترک · ' + fa(c.posts || 0) + ' پست · مالک: ' + (c.owner_name || '');
+    const subBtn = document.getElementById('chSubBtn');
+    subBtn.textContent = c.is_owner ? 'مالک کانال' : (c.subscribed ? 'لغو عضویت' : 'عضویت');
+    subBtn.disabled = !!c.is_owner;
+    document.getElementById('chDelBtn').style.display = c.is_owner ? '' : 'none';
+    document.getElementById('channelComposer').style.display = c.is_owner ? 'flex' : 'none';
+
+    renderSideList();
+    loadChannelPosts();
+}
+
+function loadChannelPosts() {
+    if (!selectedChannelId) return;
+    apiFetch('/channel_posts/' + selectedChannelId).then(r => r.json()).then(posts => {
+        channelPostsCache = Array.isArray(posts) ? posts : [];
+        renderChannelPosts();
+        /* بازدید هر پست یک‌بار شمرده شود */
+        channelPostsCache.forEach(p => {
+            if (!p.viewed_by_me) {
+                apiFetch('/channel_view/' + p.id, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ channel_id: selectedChannelId })
+                }).catch(() => {});
+            }
+        });
+    }).catch(() => {});
+}
+
+let channelPostsCache = [];
+
+function renderChannelPosts() {
+    const box = document.getElementById('channelPosts');
+    if (!box) return;
+    if (!channelPostsCache.length) {
+        box.innerHTML = '<div class="empty-side" style="padding:26px 14px;">هنوز پستی منتشر نشده 📢</div>';
+        return;
+    }
+    box.innerHTML = channelPostsCache.map(p => {
+        let media = '';
+        if (p.media) {
+            const url = mediaURL(p.media);
+            media = p.file_type === 'image'
+                ? `<div class="cpost-media"><img src="${url}" alt=""></div>`
+                : `<div class="cpost-media"><a class="file-chip" href="${url}" target="_blank">${esc(p.file_name || (p.file_type === 'video' ? 'ویدیو' : 'صوت'))}</a></div>`;
+        }
+        return `
+        <div class="cpost" id="cpost-${p.id}">
+            <div class="cpost-head">
+                ${avatarHTML({ id: p.channel_id + 2000, full_name: (selectedChatObj && selectedChatObj.name) || 'کانال' }, 26)}
+                <span class="cpost-author">${esc((selectedChatObj && selectedChatObj.name) || 'کانال')}</span>
+                <span class="cpost-time">${faTime(p.timestamp)}</span>
+            </div>
+            ${p.content ? `<div class="cpost-body">${esc(p.content)}</div>` : ''}
+            ${media}
+            <div class="cpost-foot">
+                <span>👁 ${fa(p.views || 0)}</span>
+                <button onclick="toggleChannelComments(${p.id})">💬 ${fa(p.comments || 0)} نظر</button>
+            </div>
+            <div class="cpost-cmts" id="ccmts-${p.id}"></div>
+        </div>`;
+    }).join('');
+}
+
+function toggleChannelComments(pid) {
+    const box = document.getElementById('ccmts-' + pid);
+    if (!box) return;
+    if (box.classList.contains('open')) { box.classList.remove('open'); return; }
+    box.classList.add('open');
+    apiFetch('/channel_comments/' + pid).then(r => r.json()).then(list => {
+        const mine = currentUser ? currentUser.id : 0;
+        box.innerHTML = (Array.isArray(list) ? list : []).map(c =>
+            `<div class="cpost-cmt"><b>${esc(c.user_name || 'کاربر')}</b>: ${esc(c.content)}</div>`).join('')
+            + `<div class="cpost-cmt-in"><input type="text" id="ccin-${pid}" placeholder="نظرت را بنویس…" onkeydown="if(event.key==='Enter')sendChannelComment(${pid})"><button class="btn xs" onclick="sendChannelComment(${pid})">ارسال</button></div>`;
+    }).catch(() => {});
+}
+
+function sendChannelComment(pid) {
+    const inp = document.getElementById('ccin-' + pid);
+    const text = (inp && inp.value || '').trim();
+    if (!text || !selectedChannelId) return;
+    apiFetch('/channel_comment/' + pid, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: text, channel_id: selectedChannelId })
+    }).then(r => r.json()).then(res => {
+        if (!res.success) return toast(res.message || 'نظر ثبت نشد', 'error');
+        if (inp) inp.value = '';
+        toggleChannelComments(pid); toggleChannelComments(pid);
+    });
+}
+
+function toggleChannelSub() {
+    if (!selectedChannelId) return;
+    apiFetch('/channel_subscribe/' + selectedChannelId, { method: 'POST' })
+        .then(r => r.json()).then(res => {
+            if (!res.success) return toast(res.message || 'ناموفق', 'error');
+            toast(res.subscribed ? 'عضو شدی 📢' : 'عضویت لغو شد', 'info');
+            loadChannels();
+            apiFetch('/channel_info/' + selectedChannelId).then(r => r.json()).then(c => { if (c && c.id) selectChannel(c); });
+        });
+}
+
+function channelFilePicked(inp) {
+    channelFile = (inp.files && inp.files[0]) || null;
+    const inp2 = document.getElementById('channelInput');
+    if (inp2 && channelFile) inp2.placeholder = 'پیوست: ' + channelFile.name;
+}
+
+function postToChannel() {
+    if (!selectedChannelId) return;
+    const inp = document.getElementById('channelInput');
+    const text = (inp.value || '').trim();
+    if (!text && !channelFile) return toast('متن بنویس یا فایل انتخاب کن', 'error');
+    const fd = new FormData();
+    if (text) fd.append('content', text);
+    if (channelFile) fd.append('file', channelFile);
+    apiFetch('/channel_post/' + selectedChannelId, { method: 'POST', body: fd })
+        .then(r => r.json()).then(res => {
+            if (!res.success) return toast(res.message || 'منتشر نشد', 'error');
+            inp.value = ''; channelFile = null;
+            document.getElementById('channelFileIn').value = '';
+            inp.placeholder = 'برای مشترک‌ها بنویس…';
+            toast(res.message || 'منتشر شد', 'success');
+            loadChannelPosts();
+            loadChannels();
+        });
+}
+
+function deleteChannel() {
+    if (!selectedChannelId) return;
+    if (!confirm('کانال برای همیشه حذف شود؟')) return;
+    apiFetch('/channel_delete/' + selectedChannelId, { method: 'DELETE' })
+        .then(r => r.json()).then(res => {
+            toast(res.message || (res.success ? 'حذف شد' : 'ناموفق'), res.success ? 'success' : 'error');
+            closeChannelPane();
+            loadChannels();
+        });
+}
+
+function openChannelModal() {
+    const m = document.getElementById('channelModal');
+    document.getElementById('channelName').value = '';
+    document.getElementById('channelBio').value = '';
+    m.classList.add('active');
+}
+function closeChannelModal() { document.getElementById('channelModal').classList.remove('active'); }
+
+function createChannel() {
+    const name = document.getElementById('channelName').value.trim();
+    const bio = document.getElementById('channelBio').value.trim();
+    if (!name) return toast('نام کانال را بنویس', 'error');
+    apiFetch('/create_channel', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, bio })
+    }).then(r => r.json()).then(res => {
+        if (!res.success) return toast(res.message || 'ساخته نشد', 'error');
+        toast(res.message || 'کانال ساخته شد', 'success');
+        closeChannelModal();
+        setSideList('channels');
+        if (res.channel) selectChannel(res.channel);
+    });
+}
+
+/* ═══════════════ اعلان روی گوشی ═══════════════
+ *
+ * دو حالت دارد:
+ *  • اپ باز است یا تبش در پس‌زمینه است → خود صفحه اعلان را نشان می‌دهد.
+ *    این حالت هیچ سروری نمی‌خواهد و روی GitHub Pages هم کار می‌کند.
+ *  • اپ کاملاً بسته است → باید سرویس پوش (FCM/Apple/Mozilla) مرورگر را
+ *    بیدار کند. مرورگر اجازه ندارد مستقیم به سرویس پوش POST بزند (CORS
+ *    جلویش را می‌گیرد)، پس این حالت فقط با سرور نود ممکن است؛ در حالت
+ *    MQTT/Pages خودبه‌خود خاموش می‌ماند.
+ */
+let notifPushSub = null;
+
+function notifSupported() { return typeof window !== 'undefined' && 'Notification' in window; }
+
+function notifGranted() { return notifSupported() && Notification.permission === 'granted'; }
+
+/** کاربر باید خودش روشن کند؛ مرورگر اجازهٔ خودکار نمی‌دهد */
+function notifWanted() { return localStorage.getItem('jvl_notify') === '1'; }
+
+function notifEnabled() { return notifWanted() && notifGranted(); }
+
+async function notifRegistration() {
+    if (!('serviceWorker' in navigator)) return null;
+    try { return await navigator.serviceWorker.getRegistration(); } catch { return null; }
+}
+
+/**
+ * نمایش اعلان واقعی سیستم‌عامل. اول از راه service worker — چون وقتی صفحه در
+ * پس‌زمینه است هم درست کار می‌کند و tag/renotify را می‌فهمد — و اگر نشد از
+ * سازندهٔ سادهٔ Notification.
+ */
+async function notifyOS(title, body, opts = {}) {
+    if (!notifEnabled()) return false;
+    const payload = {
+        body: body || '',
+        icon: 'icon-192.png',
+        badge: 'icon-192.png',
+        dir: 'rtl',
+        lang: 'fa',
+        tag: opts.tag || undefined,
+        renotify: !!opts.tag,
+        data: { url: 'index.html', peer: opts.peer || null, group: opts.group || null, call: opts.call || null }
+    };
+    try {
+        const reg = await notifRegistration();
+        if (reg && reg.showNotification) { await reg.showNotification(title, payload); return true; }
+    } catch { /* می‌افتیم روی حالت ساده */ }
+    try {
+        if (notifGranted()) { new Notification(title, payload); return true; }
+    } catch { /* بعضی مرورگرهای موبایل سازندهٔ مستقیم را قبول ندارند */ }
+    return false;
+}
+
+/** وقتی کاربر دارد همان گفتگو را نگاه می‌کند اعلان نده — فقط مزاحم است */
+function shouldNotifyFor(peerId, groupId) {
+    if (!notifEnabled()) return false;
+    if (document.visibilityState === 'visible') {
+        if (groupId && selectedGroupId == groupId) return false;
+        if (!groupId && peerId && selectedUserId == peerId) return false;
+    }
+    return true;
+}
+
+function notifyNewMessage(msg) {
+    if (!msg) return;
+    if (msg.sender_id == currentUser.id) return;
+    if (!shouldNotifyFor(msg.sender_id, msg.group_id)) return;
+    const isGroup = !!msg.group_id;
+    /*
+     * رویداد زندهٔ new_message فیلد sender_name ندارد (فقط GET /messages آن را
+     * پر می‌کند)، پس نام نمایشی را از کش کاربران می‌گیریم؛ اگر نبود به همان
+     * فیلد و در نهایت به یک برچسب عمومی می‌افتیم.
+     */
+    const sender = allUsersCache.find(x => x.id == msg.sender_id);
+    let who = (sender && sender.full_name) || msg.sender_name || 'پیام جدید';
+    if (isGroup) {
+        const g = (typeof groupsCache !== 'undefined' ? groupsCache : []).find(x => x.id == msg.group_id);
+        who = (g ? g.name : 'گروه') + ' · ' + who;
+    }
+    const body = msg.content
+        || (msg.file_type === 'image' ? '🖼 تصویر'
+        : (msg.file_type || '').startsWith('audio') || /\.webm$/i.test(msg.file_name || '') ? '🎙 پیام صوتی'
+        : '📎 ' + (msg.file_name || 'پیوست'));
+    notifyOS(who, body, {
+        tag: 'dm-' + (isGroup ? 'g' + msg.group_id : msg.sender_id),
+        peer: isGroup ? null : msg.sender_id,
+        group: isGroup ? msg.group_id : null
+    });
+}
+
+function notifyIncomingCall(d) {
+    if (!notifEnabled() || !d) return;
+    const u = allUsersCache.find(x => x.id === d.from);
+    const name = (u && u.full_name) || d.fromName || 'ناشناس';
+    notifyOS('📞 ' + name, d.video ? 'تماس تصویری ورودی' : 'تماس صوتی ورودی',
+        { tag: 'call', peer: d.from, call: d.callId });
+}
+
+async function toggleNotifications() {
+    if (!notifSupported()) { toast('این مرورگر اعلان ندارد', 'error'); return; }
+    if (notifWanted() && notifGranted()) {
+        localStorage.removeItem('jvl_notify');
+        await pushUnsubscribe();
+        refreshNotifUI();
+        toast('اعلان خاموش شد', 'info');
+        return;
+    }
+    let perm;
+    try { perm = await Notification.requestPermission(); } catch { perm = Notification.permission; }
+    if (perm !== 'granted') {
+        refreshNotifUI();
+        toast(perm === 'denied' ? 'مرورگر اجازه را رد کرده؛ از قفلِ کنار آدرس بازش کن' : 'اجازه داده نشد', 'error');
+        return;
+    }
+    localStorage.setItem('jvl_notify', '1');
+    await pushSubscribe();
+    refreshNotifUI();
+    toast('اعلان روشن شد ✅', 'success');
+    notifyOS('Volexturn', 'اعلان‌ها فعال شد. حالا حتی اگر اپ در پس‌زمینه باشد خبرت می‌کنیم.', { tag: 'hello' });
+}
+
+function testNotification() {
+    if (!notifEnabled()) { toast('اول اعلان را روشن کن', 'error'); return; }
+    notifyOS('آزمایش اعلان', 'اگر این را روی نوار اعلان گوشی دیدی، درست کار می‌کند ✅', { tag: 'test' });
+}
+
+async function refreshNotifUI() {
+    const state = document.getElementById('notifState');
+    const btn = document.getElementById('notifBtn');
+    const hint = document.getElementById('notifHint');
+    if (!state || !btn || !hint) return;
+
+    if (!notifSupported()) {
+        state.textContent = 'پشتیبانی نمی‌شود';
+        state.className = 'notif-state off';
+        btn.style.display = 'none';
+        hint.innerHTML = 'این مرورگر API اعلان ندارد.';
+        return;
+    }
+    const perm = Notification.permission;
+    const on = notifEnabled();
+    state.className = 'notif-state ' + (on ? 'on' : 'off');
+
+    if (perm === 'denied') {
+        state.textContent = 'مسدود در مرورگر';
+        btn.style.display = 'none';
+        hint.innerHTML = 'اجازهٔ اعلان در مرورگر رد شده. قفلِ کنار نوار آدرس را بزن و Notifications را روی Allow بگذار.';
+        return;
+    }
+    btn.style.display = '';
+    if (on) {
+        state.textContent = notifPushSub ? 'روشن + پوشِ اپِ بسته' : 'روشن';
+        btn.textContent = 'خاموش کردن';
+        hint.innerHTML = notifPushSub
+            ? 'اعلان حتی وقتی اپ کاملاً بسته است می‌رسد (از راه سرور).'
+            : 'وقتی اپ باز یا در پس‌زمینه باشد اعلان می‌گیری. برای اعلان با اپِ بسته نسخهٔ سرور لازم است.';
+    } else {
+        state.textContent = perm === 'granted' ? 'آماده (خاموش)' : 'خاموش';
+        btn.textContent = 'روشن کردن';
+        hint.innerHTML = 'پیام و تماس روی نوار اعلان گوشی می‌آید. در iOS باید اپ را با Add to Home Screen نصب کرده باشی.';
+    }
+}
+
+/* ── اشتراک Web Push — فقط وقتی سرور نود پشت اپ باشد ── */
+async function pushSubscribe() {
+    notifPushSub = null;
+    try {
+        const reg = await notifRegistration();
+        if (!reg || !reg.pushManager) return;
+        const keyRes = await apiFetch('/push_public_key');
+        const keyInfo = await keyRes.json();
+        /* در حالت MQTT چنین مسیری نیست → بی‌صدا رد می‌شویم */
+        if (!keyRes.ok || !keyInfo || !keyInfo.publicKey) return;
+        const sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: urlB64ToUint8(keyInfo.publicKey)
+        });
+        const raw = sub.toJSON();
+        const res = await apiFetch('/push_subscribe', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: raw.endpoint, p256dh: raw.keys && raw.keys.p256dh, auth: raw.keys && raw.keys.auth })
+        });
+        if (res.ok) notifPushSub = raw;
+    } catch { /* بدون سرور یا بدون پشتیبانی مرورگر */ }
+    refreshNotifUI();
+}
+
+async function pushUnsubscribe() {
+    try {
+        const reg = await notifRegistration();
+        const sub = reg && reg.pushManager && await reg.pushManager.getSubscription();
+        if (sub) {
+            const raw = sub.toJSON();
+            await apiFetch('/push_unsubscribe', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ endpoint: raw.endpoint })
+            });
+            await sub.unsubscribe();
+        }
+    } catch { /* ignore */ }
+    notifPushSub = null;
+}
+
+function urlB64ToUint8(b64) {
+    const pad = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+    const bin = atob(pad.replace(/-/g, '+').replace(/_/g, '/'));
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+}
+
+/** service worker بعد از کلیک روی اعلان این پیام را می‌فرستد */
+function bindNotificationBridge() {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker.addEventListener('message', (e) => {
+        const d = e.data || {};
+        if (d.type !== 'jvl-navigate') return;
+        if (d.group) {
+            const g = groupsCache.find(x => x.id == d.group);
+            if (g) { switchTab('chat'); selectGroup(g); }
+        } else if (d.peer) {
+            openChatWith(d.peer);
+        }
+    });
+}
+
+/**
+ * لینک عمیق: بعد از کلیک روی اعلان، آدرس با ?peer=123 باز می‌شود.
+ * یک‌بار مصرف است چون loadUsers هر بار که به تب چت برویم صدا زده می‌شود.
+ */
+let deepLinkDone = false;
+function handleDeepLink() {
+    if (deepLinkDone) return;
+    try {
+        const q = new URLSearchParams(location.search);
+        const peer = q.get('peer'), group = q.get('group');
+        if (!peer && !group) return;
+        deepLinkDone = true;
+        if (group) {
+            const g = (typeof groupsCache !== 'undefined' ? groupsCache : []).find(x => x.id == group);
+            if (g) { switchTab('chat'); selectGroup(g); return; }
+        }
+        if (peer) { switchTab('chat'); openChatWith(Number(peer)); }
+    } catch { /* ignore */ }
+}
+
 (function boot() {
     // تشخیص مغایرت نسخه صفحه با سرور (مثلاً فایل قدیمی کش‌شده)
     fetch('/api/app_info').then(r => r.json()).then(info => {
@@ -2677,6 +4476,20 @@ function logout() {
             toast('نسخه صفحه (' + APP_VERSION + ') با سرور (' + info.version + ') فرق دارد — یک بار رفرش سخت بکن', 'warning', 9000);
         }
     }).catch(() => {});
+    /* PWA: نصب‌پذیر و قابل استفادهٔ آفلاین (پوستهٔ برنامه) */
+    if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('sw.js')
+                .then(() => {
+                    /* بعد از ثبت، اگر قبلاً اشتراک پوش داشتیم تازه‌اش کن */
+                    if (notifWanted() && notifGranted()) pushSubscribe();
+                })
+                .catch(() => { /* اختیاری است */ });
+        });
+    }
+    /* کلیک روی اعلان در service worker و لینک عمیق ?peer= */
+    bindNotificationBridge();
+    refreshNotifUI();
     const savedTheme = localStorage.getItem('volexturn_theme');
     if (savedTheme) document.documentElement.setAttribute('data-theme', savedTheme);
     applyThemeIcons();
