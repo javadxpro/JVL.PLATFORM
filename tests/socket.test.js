@@ -223,6 +223,53 @@ test('لایک پست روی سوکت همه منتشر می‌شود', async ()
     b.s.disconnect();
 });
 
+test('نظر تازهٔ کانال به مشترک‌ها می‌رسد، به نویسنده نه', async () => {
+    const ch = await alice.post('/create_channel', { name: 'اخبار تست سوکت' });
+    assert.equal(ch.body.success, true, JSON.stringify(ch.body));
+    const cid = ch.body.channel_id;
+    await bob.post(`/channel_subscribe/${cid}`, {});
+
+    const a = connect(alice), b = connect(bob);
+    a.on('channel_comment_added');
+    b.on('channel_comment_added');
+    await Promise.all([connected(a), connected(b)]);
+    a.s.emit('join', { user_id: alice.user.id });
+    b.s.emit('join', { user_id: bob.user.id });
+    await new Promise(r => setTimeout(r, 100));
+
+    const made = await alice.post(`/channel_post/${cid}`, { content: 'خبر اول' });
+    const pid = made.body.post.id;
+
+    await alice.post(`/channel_comment/${pid}`, { content: 'نظر آلیس' });
+    const got = await waitFor(b.events, 'channel_comment_added');
+    assert.equal(got.channel_id, cid);
+    assert.equal(got.post_id, pid);
+    assert.equal(a.events.find(e => e.name === 'channel_comment_added'), undefined,
+        'نویسنده نباید رویداد خودش را بگیرد');
+
+    a.s.disconnect();
+    b.s.disconnect();
+});
+
+test('حذف پست توسط مدیر روی سوکت بقیه منتشر می‌شود', async () => {
+    const made = await bob.upload('/create_post', { content: 'پستی که حذف می‌شود' }, null);
+    const pid = made.body.post.id;
+
+    const b = connect(bob);
+    b.on('post_deleted');
+    await connected(b);
+    b.s.emit('join', { user_id: bob.user.id });
+    await new Promise(r => setTimeout(r, 100));
+
+    /* آلیس مدیر است */
+    const del = await alice.del(`/api/admin/delete_post/${pid}`);
+    assert.equal(del.body.success, true, JSON.stringify(del.body));
+
+    const ev = await waitFor(b.events, 'post_deleted');
+    assert.equal(ev.post_id, pid);
+    b.s.disconnect();
+});
+
 test('بن شدن، اتصال زندهٔ سوکت را همان لحظه قطع می‌کند', async () => {
     const b = connect(bob);
     b.on('banned');

@@ -1926,6 +1926,8 @@
         const cmt = { id, pid, cid, user_id: self.id, user_name: self.full_name, content, at: now() };
         publish(`${P()}/ccmt/${pid}/${id}`, cmt);
         socketEmit('channel_comment_added', { post_id: pid, comment: cmt });
+        /* بدون این، بقیهٔ مشترک‌ها هرگز نمی‌فهمند نظر تازه‌ای آمده */
+        broadcast('channel_comment_added', { channel_id: cid, post_id: pid });
         return ok({ success: true, comment: cmt });
     });
 

@@ -1590,6 +1590,16 @@ function connectSocket() {
     socket.on('channel_post_added', (d) => {
         if (selectedChannelId && d && d.channel_id == selectedChannelId) loadChannelPosts();
     });
+    /* نظر تازه: فقط اگر همان جعبه باز باشد، بی‌صدا تازه می‌شود */
+    socket.on('channel_comment_added', (d) => {
+        if (!d || !d.post_id) return;
+        const box = document.getElementById('ccmts-' + d.post_id);
+        if (box && box.classList.contains('open')) loadChannelComments(d.post_id);
+    });
+    /* مدیر پستی را حذف کرده — تا خودت صفحه را نبندی نباید همان‌جا بماند */
+    socket.on('post_deleted', () => {
+        if (document.getElementById('exploreTab').classList.contains('active')) loadExplore();
+    });
     /*
      * تیک دوم: پیام به دستگاه گیرنده رسیده. فقط همان حباب‌هایی که
      * شناسه‌شان آمده به‌روز می‌شوند، نه کل لیست.
@@ -4209,11 +4219,21 @@ function toggleChannelComments(pid) {
     if (!box) return;
     if (box.classList.contains('open')) { box.classList.remove('open'); return; }
     box.classList.add('open');
+    loadChannelComments(pid);
+}
+
+/** فهرست نظرها را می‌گیرد؛ متن نیمه‌نوشتهٔ کاربر پاک نمی‌شود */
+function loadChannelComments(pid) {
+    const box = document.getElementById('ccmts-' + pid);
+    if (!box) return;
+    const typing = document.getElementById('ccin-' + pid);
+    const draft = typing ? typing.value : '';
     apiFetch('/channel_comments/' + pid).then(r => r.json()).then(list => {
-        const mine = currentUser ? currentUser.id : 0;
         box.innerHTML = (Array.isArray(list) ? list : []).map(c =>
             `<div class="cpost-cmt"><b>${esc(c.user_name || 'کاربر')}</b>: ${esc(c.content)}</div>`).join('')
             + `<div class="cpost-cmt-in"><input type="text" id="ccin-${pid}" placeholder="نظرت را بنویس…" onkeydown="if(event.key==='Enter')sendChannelComment(${pid})"><button class="btn xs" onclick="sendChannelComment(${pid})">ارسال</button></div>`;
+        const inp = document.getElementById('ccin-' + pid);
+        if (inp && draft) { inp.value = draft; }
     }).catch(() => {});
 }
 

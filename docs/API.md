@@ -192,7 +192,9 @@ lan_host    { id, user_id, full_name, username, game_name, ip_address, port, des
 | `post_like` | `{post_id, likes_count, liked, user_id}` | هر لایک (پخش سراسری) |
 | `post_comment` | `{post_id, comments_count, user_id}` | ثبت نظر |
 | `post_view` | `{post_id, views}` | ثبت بازدید ویدیو |
-| `post_deleted` | `{post_id}` | حذف پست توسط مدیر |
+| `post_deleted` | `{post_id}` | حذف پست توسط مدیر — اکسپلورِ باز خودبه‌خود تازه می‌شود |
+| `channel_post_added` | `{channel_id, post_id}` | پست تازهٔ کانال، فقط برای مشترک‌ها |
+| `channel_comment_added` | `{channel_id, post_id}` | نظر تازهٔ کانال، فقط برای مشترک‌ها |
 | `follow_update` | `{target_id, follower_id, following}` | تغییر وضعیت دنبال‌کردن |
 | `voice_signal` | `{room, sender, signal}` | رلهٔ سیگنال WebRTC |
 | `banned` | `{message, ip?}` | بن‌شدن حساب یا نشانی — بلافاصله بعدش اتصال قطع می‌شود و کلاینت نشست را پاک می‌کند |

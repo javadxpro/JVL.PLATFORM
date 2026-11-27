@@ -203,6 +203,10 @@ router.post('/channel_comment/:pid', requireAuth, (req, res) => {
         'INSERT INTO channel_comments (post_id, user_id, content, created_at) VALUES (?,?,?,?)',
         pid, req.user.id, content, now()
     );
+    /* مشترک‌ها بفهمند نظر تازه‌ای آمده — پیش‌تر فقط لایهٔ MQTT چیزی می‌فرستاد */
+    rt.emitTo(subIds(db, post.channel_id).filter(id => id !== req.user.id),
+        'channel_comment_added', { channel_id: post.channel_id, post_id: pid });
+
     /* شکل پاسخ با لایهٔ MQTT یکی باشد */
     res.json({
         success: true,
