@@ -73,11 +73,29 @@ function readClientVersion() {
     } catch { return null; }
 }
 
+/**
+ * آیا این نود می‌تواند `node:sqlite` را **بدون فلگ** بار کند؟
+ *
+ * کفِ واقعی را همین ماژول تعیین می‌کند: در ۲۲.۵.۰ اضافه شد ولی تا ۲۲.۱۳.۰
+ * (و در شاخهٔ ۲۳ تا ۲۳.۴.۰) پشتِ `--experimental-sqlite` بود، و `npm start`
+ * بدون فلگ اجرا می‌شود. پس ۲۲.۵ تا ۲۲.۱۲ و ۲۳.۰ تا ۲۳.۳ با
+ * `ERR_UNKNOWN_BUILTIN_MODULE` می‌ترکند — بررسیِ «major >= 22» اینها را رد
+ * می‌کرد و doctor سبز می‌شد.
+ */
+function nodeVersionOk(version) {
+    const [maj, min] = String(version).replace(/^v/, '').split('.').map(Number);
+    if (!(maj >= 0)) return false;
+    if (maj > 23) return true;
+    if (maj === 23) return min >= 4;
+    if (maj === 22) return min >= 13;
+    return false;
+}
+
 function doctor() {
     let problems = 0;
-    const nodeMajor = Number(process.versions.node.split('.')[0]);
-    console.log(`نود: ${process.version} ${nodeMajor >= 22 ? '✔' : '✖ (>=22.5 لازم است)'}`);
-    if (nodeMajor < 22) problems++;
+    const ok = nodeVersionOk(process.versions.node);
+    console.log(`نود: ${process.version} ${ok ? '✔' : '✖ (>=22.13 لازم است — node:sqlite پیش از آن فلگ می‌خواهد)'}`);
+    if (!ok) problems++;
 
     for (const mod of ['express', 'socket.io', 'socket.io-client', 'multer', 'vazirmatn']) {
         try {
@@ -222,4 +240,4 @@ if (require.main === module) {
     try { main(); } catch (e) { fail(e && e.message ? e.message : String(e)); }
 }
 
-module.exports = { main, readClientVersion };
+module.exports = { main, readClientVersion, nodeVersionOk };

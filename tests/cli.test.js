@@ -106,6 +106,29 @@ test('cli reset --yes داده‌ها را پاک می‌کند', async () => {
     assert.equal(json.users, 0);
 });
 
+test('کفِ نود: node:sqlite باید بدون فلگ بار شود', () => {
+    const { nodeVersionOk } = require('../server/cli.js');
+
+    /*
+     * node:sqlite در ۲۲.۵.۰ اضافه شد ولی تا ۲۲.۱۳.۰ (و در شاخهٔ ۲۳ تا ۲۳.۴.۰)
+     * پشتِ --experimental-sqlite بود. چون npm start بدون فلگ اجرا می‌شود، آن
+     * نسخه‌ها با ERR_UNKNOWN_BUILTIN_MODULE می‌ترکند — پس باید رد شوند.
+     */
+    for (const v of ['18.20.4', '20.19.0', '21.7.3', '22.4.0', '22.5.0', '22.12.9', '23.0.0', '23.3.9']) {
+        assert.equal(nodeVersionOk(v), false, `${v} نباید پذیرفته شود`);
+    }
+    for (const v of ['22.13.0', '22.13.1', '22.22.3', '23.4.0', '24.22.1', '26.12.1', 'v24.1.0']) {
+        assert.equal(nodeVersionOk(v), true, `${v} باید پذیرفته شود`);
+    }
+    assert.equal(nodeVersionOk(process.versions.node), true,
+        `نودِ فعلی (${process.version}) باید از کف بگذرد`);
+
+    /* engines در package.json نباید از doctor جدا بیفتد */
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+    assert.match(pkg.engines.node, /22\.13/, 'engines باید همان کفِ ۲۲.۱۳ را بگوید: ' + pkg.engines.node);
+    assert.ok(!pkg.engines.node.includes('22.5'), 'engines نباید ۲۲.۵ را کف بداند');
+});
+
 test.after(() => {
     fs.rmSync(DATA, { recursive: true, force: true });
 });

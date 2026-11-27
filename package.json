@@ -9,14 +9,14 @@
     "jvl": "server/cli.js"
   },
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.13.0 <23 || >=23.4"
   },
   "scripts": {
     "start": "node server/cli.js start",
     "dev": "node --watch server/cli.js start",
     "admin": "node server/cli.js create-admin",
     "stats": "node server/cli.js stats",
-    "test": "node --test --experimental-sqlite tests/*.test.js"
+    "test": "node --test tests/*.test.js"
   },
   "dependencies": {
     "aedes": "^1.2.0",

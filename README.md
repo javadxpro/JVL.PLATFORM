@@ -34,17 +34,46 @@ git push origin arena/ac24cb6b-jvl-platform
 
 ## ۲) اجرای محلی (هر دو حالت)
 
-نیاز به **Node.js ۲۲.۵+** (برای `node:sqlite`):
+نیاز به **Node.js ۲۲.۱۳+** (یا ۲۳.۴+ / ۲۴ / ۲۶):
+
+کفِ واقعی را `node:sqlite` تعیین می‌کند. این ماژول در ۲۲.۵.۰ اضافه شد ولی تا
+۲۲.۱۳.۰ پشتِ فلگِ `--experimental-sqlite` بود، و `npm start` بدون فلگ اجرا
+می‌شود — پس **۲۲.۵ تا ۲۲.۱۲ با `ERR_UNKNOWN_BUILTIN_MODULE` می‌ترکند**
+(و ۲۳.۰ تا ۲۳.۳ هم همین‌طور). `cli doctor` همین کف را چک می‌کند.
 
 ```bash
 npm install
 npm start          # سرور نود روی http://localhost:3000  → حالت REST
 npx http-server .  # یا هر سرور استاتیک دیگر            → حالت MQTT
-npm test           # ۱۴۷ تست
+npm test           # ۱۴۸ تست
 npm run doctor     # سلامت نصب + همگامی نسخهٔ صفحه با سرور
 ```
 
 اولین کسی که ثبت‌نام کند **مدیر** می‌شود.
+
+### روی ترموکس (اندروید)
+
+```bash
+pkg update && pkg upgrade
+pkg install nodejs-lts git     # nodejs-lts = شاخهٔ LTS؛ `nodejs` = Current
+node -v                        # باید ۲۲.۱۳ به بالا باشد
+git clone https://github.com/javadxpro/JVL.PLATFORM.git
+cd JVL.PLATFORM && npm install
+node server/cli.js doctor      # همه‌چیز باید ✔ باشد
+termux-wake-lock               # وگرنه اندروید سرور را در پس‌زمینه می‌کشد
+npm start
+```
+
+چند نکته که روی گوشی فرق می‌کند:
+
+- **`nodejs` با `nodejs-lts` تداخل دارد**؛ فقط یکی را نصب کن. هر دو از کفِ
+  ۲۲.۱۳ بالاترند، پس هرکدام کار می‌کند.
+- **هیچ ماژول بومی نداریم** — عمداً. `better-sqlite3` و امثال آن روی arm64
+  اغلب کامپایل نمی‌شوند؛ `node:sqlite` داخل خودِ نود است.
+- اندروید ۱۲ به بالا پروسه‌های پس‌زمینه را می‌کشد؛ `termux-wake-lock` و
+  غیرفعال‌کردنِ بهینه‌سازی باتری برای ترموکس لازم است.
+- از گوشیِ دیگر با `http://<ip-گوشی>:3000` وصل شو — سرور روی همهٔ رابط‌ها
+  گوش می‌دهد.
 
 ---
 
@@ -89,7 +118,7 @@ tests/
   ban.test.js       ۱۱ تست بنِ کاربر و نشانی IP (CIDR، رفع بن، لوکال‌هاست)
   socket.test.js    ۱۰ تست رویدادهای Socket.IO (پیام، تایپینگ، گروه، لایک، کامنت کانال، حذف پست، بن)
   server.test.js    ۷ تست یکپارچهٔ سرور
-  cli.test.js       ۸ تست ابزار خط فرمان
+  cli.test.js       ۹ تست ابزار خط فرمان (شامل کفِ نسخهٔ نود)
   mqtt.test.js      ۱۹ تست لایهٔ MQTT با بروکر واقعی aedes (حضور، ارادهٔ کهنه، رویدادها، گروه عمومی، برابری هش شماره)
   browser.test.js   ۲۳ تست index.html واقعی در jsdom (ورود، رسانه، تماس، اتاق صوتی، رویدادها، کشف گروه، مخاطبین، vcf، کانال، تیک)
   pages.test.js     ۸ تست آمادهٔ Pages بودن (مسیر نسبی، دارایی‌ها، شبه‌مرورگر)
