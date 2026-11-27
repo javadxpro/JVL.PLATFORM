@@ -664,4 +664,75 @@ test('حذف رویداد فقط برای میزبان یا مدیر', async () 
     assert.equal((await alice.get(`/event_rsvps/${evId}`)).status, 404);
 });
 
+/* ───────── کشف گروه‌های عمومی ───────── */
+
+let pubGid, privGid;
+
+test('گروه عمومی در اکسپلور پیدا می‌شود، خصوصی نه', async () => {
+    const pub = await alice.post('/create_group', { name: 'گیمرهای لان', is_public: true });
+    assert.equal(pub.body.success, true);
+    pubGid = pub.body.group_id;
+    const priv = await alice.post('/create_group', { name: 'دورهمی خصوصی بابک' });
+    privGid = priv.body.group_id;
+
+    const list = await bob.get('/public_groups');
+    assert.equal(list.status, 200);
+    assert.ok(list.body.some(g => g.id === pubGid), 'گروه عمومی باید در فهرست باشد');
+    assert.ok(!list.body.some(g => g.id === privGid), 'گروه خصوصی نباید در فهرست باشد');
+
+    const row = list.body.find(g => g.id === pubGid);
+    assert.equal(row.name, 'گیمرهای لان');
+    assert.equal(row.is_public, 1);
+    assert.equal(row.members_count, 1, 'فقط سازنده عضو است');
+    assert.equal(row.joined, false, 'بابک هنوز عضو نیست');
+});
+
+test('جست‌وجوی گروه عمومی با بخشی از نام', async () => {
+    const hit = await bob.get('/public_groups?q=' + encodeURIComponent('گیمر'));
+    assert.equal(hit.body.length, 1);
+    assert.equal(hit.body[0].id, pubGid);
+    const miss = await bob.get('/public_groups?q=' + encodeURIComponent('چیزی‌که‌وجود‌ندارد'));
+    assert.equal(miss.body.length, 0);
+});
+
+test('پیوستن به گروه عمومی بدون اجازهٔ مالک', async () => {
+    const before = await bob.get('/my_groups');
+    assert.ok(!before.body.some(g => g.id === pubGid), 'بابک از قبل عضو نیست');
+
+    const r = await bob.post(`/group_join/${pubGid}`, {});
+    assert.equal(r.body.success, true);
+    assert.match(r.body.message, /پیوستی/);
+
+    const after = await bob.get('/my_groups');
+    const row = after.body.find(g => g.id === pubGid);
+    assert.ok(row, 'گروه باید در فهرست گروه‌های بابک باشد');
+    assert.equal(row.my_role, 'member', 'نقش پیوسته member است نه owner');
+    assert.equal(row.is_public, 1);
+
+    const list = await bob.get('/public_groups');
+    const seen = list.body.find(g => g.id === pubGid);
+    assert.equal(seen.members_count, 2, 'شمار اعضا باید زیاد شده باشد');
+    assert.equal(seen.joined, true);
+
+    /* عضو تازه واقعاً دسترسی دارد */
+    assert.equal((await bob.get(`/group_info/${pubGid}`)).status, 200);
+});
+
+test('پیوستن دوباره و پیوستن به گروه خصوصی رد می‌شود', async () => {
+    const again = await bob.post(`/group_join/${pubGid}`, {});
+    assert.equal(again.body.success, false);
+    assert.match(again.body.message, /قبلاً عضو/);
+    assert.equal((await bob.get('/my_groups')).body.filter(g => g.id === pubGid).length, 1,
+        'عضویت تکراری ساخته نشود');
+
+    assert.equal((await bob.post(`/group_join/${privGid}`, {})).status, 403,
+        'گروه خصوصی راه ورود خودکار ندارد');
+    assert.equal((await bob.post('/group_join/99999999', {})).status, 404);
+});
+
+test('فهرست گروه‌های عمومی بدون ورود دیده نمی‌شود', async () => {
+    assert.equal((await srv.client().get('/public_groups')).status, 401);
+    assert.equal((await srv.client().post('/group_join/1', {})).status, 401);
+});
+
 test.after(async () => { if (srv) await srv.close(); });

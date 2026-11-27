@@ -1199,6 +1199,7 @@
             const last = msgs[msgs.length - 1];
             return {
                 id: g.id, name: g.name, creator_id: g.creator_id, created_at: g.created_at,
+                is_public: g.is_public ? 1 : 0,
                 my_role: g.creator_id === myId ? 'owner' : 'member',
                 members_count: groupMemberIds(g.id).length,
                 unread: msgs.filter(m => m.sender_id !== myId && (!readAt || m.timestamp > readAt)).length,
@@ -1215,7 +1216,8 @@
         if (!name) return err('نام گروه را بنویس');
         if (name.length > 60) return err('نام گروه خیلی بلند است');
         const gid = newId();
-        publish(`${P()}/group/${gid}`, { id: gid, name, creator_id: self.id, created_at: now() });
+        const isPublic = (body && body.is_public) ? 1 : 0;
+        publish(`${P()}/group/${gid}`, { id: gid, name, creator_id: self.id, created_at: now(), is_public: isPublic });
         publish(`${P()}/member/${gid}/${self.id}`, { role: 'owner', joined_at: now() });
         const members = [self.id];
         for (const uid of (Array.isArray(body.members) ? body.members : []).map(Number).filter(Boolean)) {
@@ -1226,6 +1228,35 @@
         broadcast('groups_changed', { group_id: gid });
         socketEmit('groups_changed', { group_id: gid });
         return ok({ success: true, message: `گروه «${name}» ساخته شد 👥`, group_id: gid });
+    });
+
+    route('GET', '/public_groups', async p => {
+        const e = needAuth(); if (e) return e;
+        await connect();
+        const myId = me().id;
+        const q = String((p && p.q) || '').trim().toLowerCase();
+        return ok(prefixDocs('group').map(d => d.value).filter(g => g.is_public)
+            .filter(g => !q || String(g.name).toLowerCase().includes(q))
+            .map(g => ({
+                id: g.id, name: g.name, creator_id: g.creator_id, created_at: g.created_at,
+                is_public: 1,
+                members_count: groupMemberIds(g.id).length,
+                joined: isGroupMember(g.id, myId)
+            }))
+            .sort((a, b) => (b.members_count - a.members_count) || (b.id - a.id)).slice(0, 30));
+    });
+
+    route('POST', '/group_join/:gid', async p => {
+        const e = needAuth(); if (e) return e;
+        const self = me(), gid = Number(p.gid);
+        const g = getDoc(`group/${gid}`);
+        if (!g) return err('گروه پیدا نشد', 404);
+        if (!g.is_public) return err('این گروه عمومی نیست — مالک باید تو را اضافه کند', 403);
+        if (isGroupMember(gid, self.id)) return err('قبلاً عضو این گروه هستی');
+        publish(`${P()}/member/${gid}/${self.id}`, { role: 'member', joined_at: now() });
+        broadcast('groups_changed', { group_id: gid });
+        socketEmit('groups_changed', { group_id: gid });
+        return ok({ success: true, message: `به «${g.name}» پیوستی 👥` });
     });
 
     route('GET', '/group_info/:gid', async p => {
@@ -1239,7 +1270,7 @@
         const members = ids.map(id => findUser(id)).filter(Boolean).map(u => ({
             ...serializeUser(u), role: u.id === g.creator_id ? 'owner' : 'member'
         })).sort((a, b) => (a.role === b.role ? 0 : a.role === 'owner' ? -1 : 1));
-        return ok({ success: true, group: { id: g.id, name: g.name, creator_id: g.creator_id, created_at: g.created_at }, members });
+        return ok({ success: true, group: { id: g.id, name: g.name, creator_id: g.creator_id, created_at: g.created_at, is_public: g.is_public ? 1 : 0 }, members });
     });
 
     route('POST', '/group_add_member/:gid', async (p, body) => {

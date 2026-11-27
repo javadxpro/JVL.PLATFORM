@@ -408,6 +408,12 @@ test('تماس صوتی: سیگنال کامل offer/answer روی MQTT رد و 
     await openChat(a, lili);
     await openChat(b, hadi);
 
+    /*
+     * این تست نگهبانِ باگِ callId است. پاسخ‌دهنده پیش‌تر در beginCall یک شناسهٔ
+     * تازه می‌ساخت، و چون هندلرها callId را چک نمی‌کردند هیچ‌کس نمی‌فهمید که دو
+     * طرف با دو شناسهٔ مختلف حرف می‌زنند. حالا اگر answer با شناسهٔ اشتباه
+     * برسد، سمت تماس‌گیرنده دورش می‌ریزد و همین‌جا می‌شکند.
+     */
     /* الف تماس می‌گیرد */
     a.win.startCall(false);
     await waitFor(() => b.win.document.getElementById('callIncoming').classList.contains('on'), 15000, 'نمایش تماس ورودی سمت لیلی');
@@ -961,4 +967,51 @@ test('رویدادها در اکسپلور: ساخت، فهرست و پاسخ', 
     a.win.loadEvents();
     await waitFor(() => /۱ می‌آیند/.test(a.win.document.getElementById('eventsList').textContent),
         12000, 'شمارش باید در UI دیده شود');
+});
+
+test('کشف گروه عمومی در اکسپلور: ساخت، جست‌وجو و پیوستن', async () => {
+    const [a, b] = await twoLoggedIn('brz-grp', ['sara', 'kaveh']);
+
+    /* دقیقاً همان کاری که کاربر با مودال می‌کند: نام + تیک «گروه عمومی» */
+    a.win.document.getElementById('groupName').value = 'گیمرهای لان';
+    a.win.document.getElementById('groupPublic').checked = true;
+    a.win.submitCreateGroup();
+
+    const find = async w => (await w.fetch('/public_groups').then(r => r.json()))
+        .find(g => g.name === 'گیمرهای لان');
+    await waitFor(async () => !!(await find(a.win)), 15000, 'گروه عمومی باید از API دیده شود');
+    const gid = (await find(a.win)).id;
+
+    /* رفتن به اکسپلور کاربر دوم — همان کاری که کلیک روی تب می‌کند */
+    b.win.switchTab('explore', b.win.document.querySelector('[data-tab="explore"]'));
+    /*
+     * در حالت MQTT سندِ group/ با تأخیر به کش کاربر دوم می‌رسد و switchTab فقط
+     * یک بار واکشی می‌کند؛ پس خودِ waitFor دوباره واکشی می‌کند.
+     */
+    const boxText = () => b.win.document.getElementById('publicGroupsList').textContent;
+    const refetch = async () => { b.win.loadPublicGroups(); await settle(120); return boxText(); };
+    await waitFor(async () => (await refetch()).includes('گیمرهای لان'),
+        15000, 'گروه باید در اکسپلور کاربر دوم فهرست شود');
+    assert.match(b.win.document.getElementById('publicGroupsList').textContent, /پیوستن/,
+        'برای عضوِ‌نبوده باید دکمهٔ پیوستن باشد');
+
+    /* جست‌وجو: اول نتیجه دارد، بعد بی‌نتیجه */
+    b.win.document.getElementById('pubGroupQ').value = 'گیمر';
+    await waitFor(async () => (await refetch()).includes('گیمرهای لان'),
+        15000, 'جست‌وجو باید گروه را پیدا کند');
+    b.win.document.getElementById('pubGroupQ').value = 'zzz';
+    await waitFor(async () => !(await refetch()).includes('گیمرهای لان'),
+        15000, 'جست‌وجوی بی‌نتیجه باید فهرست را خالی کند');
+
+    /* پیوستن با همان دکمه‌ای که در UI هست */
+    b.win.document.getElementById('pubGroupQ').value = '';
+    await refetch();
+    b.win.joinPublicGroup(gid);
+    await waitFor(async () => (await b.win.fetch('/my_groups').then(r => r.json())).some(g => g.id === gid),
+        15000, 'کاربر دوم باید عضو گروه شود');
+
+    /* حالا باید به‌جای «پیوستن» وضعیت عضویت ببیند */
+    await waitFor(async () => /عضو هستی/.test(await refetch()),
+        15000, 'وضعیت عضویت باید در UI دیده شود');
+    assert.ok(!boxText().includes('پیوستن'), 'بعد از عضویت دکمهٔ پیوستن نماند');
 });

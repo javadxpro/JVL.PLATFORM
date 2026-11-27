@@ -54,6 +54,7 @@ router.get('/my_groups', requireAuth, (req, res) => {
             name: g.name,
             creator_id: g.creator_id,
             created_at: g.created_at,
+            is_public: g.is_public ? 1 : 0,
             my_role: g.my_role,
             members_count,
             unread,
@@ -70,12 +71,13 @@ router.post('/create_group', requireAuth, (req, res) => {
     const me = req.user.id;
     const name = String((req.body && req.body.name) || '').trim();
     const members = Array.isArray(req.body && req.body.members) ? req.body.members.map(Number).filter(Boolean) : [];
+    const isPublic = (req.body && req.body.is_public) ? 1 : 0;
 
     if (!name) return res.json({ success: false, message: 'نام گروه را بنویس' });
     if (name.length > 60) return res.json({ success: false, message: 'نام گروه خیلی بلند است' });
 
     const added = db.transaction(() => {
-        const { lastId } = db.run('INSERT INTO groups (name, creator_id, created_at) VALUES (?,?,?)', name, me, now());
+        const { lastId } = db.run('INSERT INTO groups (name, creator_id, created_at, is_public) VALUES (?,?,?,?)', name, me, now(), isPublic);
         db.run('INSERT INTO group_members (group_id, user_id, role, joined_at) VALUES (?,?,?,?)', lastId, me, 'owner', now());
         const valid = new Set();
         for (const uid of members) {
@@ -89,6 +91,41 @@ router.post('/create_group', requireAuth, (req, res) => {
 
     announceGroupChange(added.members);
     res.json({ success: true, message: `گروه «${name}» ساخته شد 👥`, group_id: added.gid });
+});
+
+/* گروه‌های عمومی — همان چیزی که «کشف گروه» در اکسپلور به آن نگاه می‌کند */
+router.get('/public_groups', requireAuth, (req, res) => {
+    const db = getDb();
+    const me = req.user.id;
+    const q = String(req.query.q || '').trim().toLowerCase();
+    let rows = db.all('SELECT * FROM groups WHERE is_public = 1');
+    if (q) rows = rows.filter(g => g.name.toLowerCase().includes(q));
+    res.json(rows.map(g => ({
+        id: g.id,
+        name: g.name,
+        creator_id: g.creator_id,
+        created_at: g.created_at,
+        is_public: 1,
+        members_count: db.count('SELECT 1 FROM group_members WHERE group_id = ?', g.id),
+        joined: isMember(g.id, me)
+    })).sort((a, b) => (b.members_count - a.members_count) || (b.id - a.id)).slice(0, 30));
+});
+
+/* پیوستن به گروه عمومی — بدون اجازهٔ مالک */
+router.post('/group_join/:gid', requireAuth, (req, res) => {
+    const db = getDb();
+    const gid = Number(req.params.gid);
+    const me = req.user.id;
+    const g = db.get('SELECT * FROM groups WHERE id = ?', gid);
+    if (!g) return res.status(404).json({ success: false, message: 'گروه پیدا نشد' });
+    if (!g.is_public) {
+        return res.status(403).json({ success: false, message: 'این گروه عمومی نیست — مالک باید تو را اضافه کند' });
+    }
+    if (isMember(gid, me)) return res.json({ success: false, message: 'قبلاً عضو این گروه هستی' });
+
+    db.run('INSERT OR IGNORE INTO group_members (group_id, user_id, role, joined_at) VALUES (?,?,?,?)', gid, me, 'member', now());
+    announceGroupChange(memberIdsOf(gid));
+    res.json({ success: true, message: `به «${g.name}» پیوستی 👥` });
 });
 
 /* اطلاعات گروه */
@@ -107,7 +144,7 @@ router.get('/group_info/:gid', requireAuth, (req, res) => {
 
     res.json({
         success: true,
-        group: { id: g.id, name: g.name, creator_id: g.creator_id, created_at: g.created_at },
+        group: { id: g.id, name: g.name, creator_id: g.creator_id, created_at: g.created_at, is_public: g.is_public ? 1 : 0 },
         members
     });
 });

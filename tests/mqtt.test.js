@@ -577,6 +577,43 @@ test('رویدادها روی MQTT مثل سمت سرور کار می‌کنند
     assert.equal((await alice.get(`/event/${eid}`)).status, 404);
 });
 
+test('کشف گروه عمومی روی MQTT مثل سمت سرور کار می‌کند', async () => {
+    const pub = await alice.post('/create_group', { name: 'گیمرهای لان', is_public: true });
+    assert.equal(pub.body.success, true, JSON.stringify(pub.body));
+    const gid = pub.body.group_id;
+    const priv = await alice.post('/create_group', { name: 'دورهمی خصوصی بابک' });
+    const pgid = priv.body.group_id;
+
+    /* سندِ retainedِ group/ باید اول به کش بابک برسد */
+    await waitFor(() => !!bob.T.getDoc(`group/${gid}`), 'رسیدن گروه عمومی به کش بابک');
+    await waitFor(() => !!bob.T.getDoc(`group/${pgid}`), 'رسیدن گروه خصوصی به کش بابک');
+
+    let list = await bob.get('/public_groups');
+    assert.ok(list.body.some(g => g.id === gid), 'گروه عمومی باید در فهرست باشد');
+    assert.ok(!list.body.some(g => g.id === pgid), 'گروه خصوصی نباید در فهرست باشد');
+    assert.equal(list.body.find(g => g.id === gid).members_count, 1, 'فقط سازنده عضو است');
+    assert.equal(list.body.find(g => g.id === gid).joined, false);
+
+    /* جست‌وجو با بخشی از نام */
+    assert.equal((await bob.get('/public_groups?q=' + encodeURIComponent('گیمر'))).body.length, 1);
+    assert.equal((await bob.get('/public_groups?q=zzz')).body.length, 0);
+
+    /* پیوستن بدون اجازهٔ مالک */
+    const j = await bob.post(`/group_join/${gid}`, {});
+    assert.equal(j.body.success, true, JSON.stringify(j.body));
+    const bobId = bob.T.allUsers().find(u => u.username === 'bob').id;
+    await waitFor(() => !!alice.T.getDoc(`member/${gid}/${bobId}`), 'رسیدن عضویت بابک به کش آلیس');
+
+    list = await alice.get('/public_groups');
+    assert.equal(list.body.find(g => g.id === gid).members_count, 2, 'شمار اعضا باید زیاد شده باشد');
+    assert.ok((await bob.get('/my_groups')).body.some(g => g.id === gid), 'گروه باید در فهرست بابک باشد');
+
+    /* دوباره پیوستن، گروه خصوصی و گروه ناموجود */
+    assert.equal((await bob.post(`/group_join/${gid}`, {})).body.success, false);
+    assert.equal((await bob.post(`/group_join/${pgid}`, {})).status, 403);
+    assert.equal((await bob.post('/group_join/99999999', {})).status, 404);
+});
+
 test.after(async () => {
     /* کلاینت‌های MQTT را ببند، وگرنه reconnect باز می‌ماند و پروسه تمام نمی‌شود */
     for (const c of allClients) { try { c.mod.shutdown(); } catch { /* ignore */ } }

@@ -62,9 +62,11 @@
 
 | مسیر | بدنه | پاسخ |
 |---|---|---|
-| `GET /my_groups` | — | `[group]` با `members_count`, `unread`, `last_content`, `last_file` |
-| `POST /create_group` | `{name, members:[uid]}` | `{success, message, group_id}` |
-| `GET /group_info/:gid` | — | `{success, group, members:[{…user, role}]}` |
+| `GET /my_groups` | — | `[group]` با `members_count`, `unread`, `last_content`, `last_file`, `is_public` |
+| `POST /create_group` | `{name, members:[uid], is_public?}` | `{success, message, group_id}` |
+| `GET /public_groups` | `?q=` اختیاری | `[group]` — فقط `is_public=1`؛ با `members_count` و `joined`. جست‌وجو زیررشتهٔ نام است، بدون حساسیت به بزرگی حرف. پرعضوترها اول، حداکثر ۳۰ مورد |
+| `POST /group_join/:gid` | — | `{success, message}` — فقط گروه عمومی؛ عضو تکراری `success:false`، گروه خصوصی `403`، ناموجود `404` |
+| `GET /group_info/:gid` | — | `{success, group:{…, is_public}, members:[{…user, role}]}` |
 | `POST /group_add_member/:gid` | `{user_id}` | `{success}` — فقط مالک یا مدیر |
 | `POST /group_remove_member/:gid` | `{user_id}` | `{success}` — مالک برای دیگران، هر عضو برای خودش |
 | `DELETE /group_delete/:gid` | — | `{success}` — مالک یا مدیر |

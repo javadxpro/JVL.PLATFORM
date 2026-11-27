@@ -74,7 +74,8 @@ CREATE TABLE IF NOT EXISTS groups (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     name       TEXT    NOT NULL,
     creator_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    created_at TEXT    NOT NULL
+    created_at TEXT    NOT NULL,
+    is_public  INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS group_members (
@@ -289,6 +290,9 @@ class Db {
             banned_by: 'INTEGER DEFAULT NULL',
             banned_reason: "TEXT DEFAULT ''",
             last_ip: 'TEXT DEFAULT NULL'
+        });
+        this.ensureColumns('groups', {
+            is_public: 'INTEGER NOT NULL DEFAULT 0'
         });
         /* WAL روی حافظه معنا ندارد؛ بی‌صدا رد می‌شود */
         return this;

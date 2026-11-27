@@ -766,6 +766,12 @@ svg.ic { flex-shrink:0; }
                     </div>
                     <div id="eventsList" style="margin-bottom:20px;"></div>
                     <div class="exp-head">
+                        <h3>👥 گروه‌های عمومی</h3>
+                        <input type="text" id="pubGroupQ" placeholder="جست‌وجوی گروه…" oninput="onPubGroupSearch()"
+                               style="max-width:220px; width:100%; padding:7px 12px; font-size:12px; font-weight:700;">
+                    </div>
+                    <div id="publicGroupsList" style="margin-bottom:20px;"></div>
+                    <div class="exp-head">
                         <h3>پست‌ها و ویدیوها</h3>
                         <button class="btn btn-ghost" onclick="openNewPostModal()">
                             <svg class="ic" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -1160,6 +1166,10 @@ svg.ic { flex-shrink:0; }
     <div class="modal-body">
         <h3>👥 ساخت گروه جدید</h3>
         <div class="field"><input type="text" id="groupName" placeholder="نام گروه (مثلاً گیمرهای LAN)"></div>
+        <label for="groupPublic" style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-2); font-weight:700; margin:0 0 10px; cursor:pointer; line-height:1.8;">
+            <input type="checkbox" id="groupPublic" style="width:16px; height:16px; accent-color:#6366f1;">
+            گروه عمومی باشد — در اکسپلور پیدا شود و دیگران خودشان بپیوندند
+        </label>
         <div style="font-size:12px; color:var(--text-2); font-weight:700; margin-bottom:4px;">انتخاب اعضا:</div>
         <div class="sel-list" id="groupMemberList"></div>
         <div class="m-actions">
@@ -1556,10 +1566,14 @@ function connectSocket() {
         }
     });
     socket.on('user_status', () => { loadUsers(); renderVoicePeers(); });
-    socket.on('groups_changed', () => loadGroups());
+    socket.on('groups_changed', () => {
+        loadGroups();
+        /* صفحه‌ها با کلاس .active باز می‌شوند، نه style.display */
+        if (document.getElementById('exploreTab').classList.contains('active')) loadPublicGroups();
+    });
     socket.on('events_changed', () => {
         /* فقط اگر تب اکسپلور باز است؛ وگرنه برای هر RSVP الکی درخواست می‌زنیم */
-        if (document.getElementById('exploreTab').style.display === 'block') loadEvents();
+        if (document.getElementById('exploreTab').classList.contains('active')) loadEvents();
     });
     /*
      * مدیر بنمان کرده: نشست را پاک می‌کنیم و به صفحهٔ ورود برمی‌گردیم.
@@ -2174,6 +2188,7 @@ async function toggleVoiceRecord() {
 function openGroupModal() {
     groupModalSelected = new Set();
     document.getElementById('groupName').value = '';
+    document.getElementById('groupPublic').checked = false;
     const list = document.getElementById('groupMemberList');
     if (!allUsersCache.length) {
         list.innerHTML = '<div class="empty-side">کاربر دیگری نیست — از دستگاه دیگه ثبت‌نام کن</div>';
@@ -2194,12 +2209,14 @@ function openGroupModal() {
 function submitCreateGroup() {
     const name = document.getElementById('groupName').value.trim();
     if (!name) { toast('نام گروه را بنویس', 'error'); return; }
-    apiFetch('/create_group', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name, members: Array.from(groupModalSelected)}) })
+    const isPublic = document.getElementById('groupPublic').checked;
+    apiFetch('/create_group', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name, members: Array.from(groupModalSelected), is_public: isPublic}) })
         .then(r => r.json()).then(res => {
             if (res.success) {
                 closeModals();
                 toast(res.message, 'success');
                 loadGroups();
+                loadPublicGroups();
             } else toast(res.message, 'error');
         });
 }
@@ -2603,6 +2620,63 @@ function createPeerConnection(sender) {
 }
 
 /* ═══════════ اکسپلور ═══════════ */
+/* ═══════════ کشف گروه‌های عمومی ═══════════ */
+let publicGroupsCache = [], pubGroupTimer = null;
+
+function loadPublicGroups() {
+    const box = document.getElementById('publicGroupsList');
+    if (!box) return;
+    const qi = document.getElementById('pubGroupQ');
+    const q = qi && qi.value ? qi.value.trim() : '';
+    apiFetch('/public_groups' + (q ? '?q=' + encodeURIComponent(q) : ''))
+        .then(r => r.json())
+        .then(list => { publicGroupsCache = Array.isArray(list) ? list : []; renderPublicGroups(); })
+        .catch(() => { publicGroupsCache = []; renderPublicGroups(); });
+}
+
+/** جست‌وجو روی MQTT یک پرس‌وجوی شبکه است؛ پس کمی صبر می‌کنیم */
+function onPubGroupSearch() {
+    if (pubGroupTimer) clearTimeout(pubGroupTimer);
+    pubGroupTimer = setTimeout(loadPublicGroups, 250);
+}
+
+function renderPublicGroups() {
+    const box = document.getElementById('publicGroupsList');
+    if (!box) return;
+    if (!publicGroupsCache.length) {
+        box.innerHTML = '<div style="font-size:12px; color:var(--text-3); padding:10px 4px; line-height:2;">گروه عمومی‌ای نیست. موقع ساخت گروه تیک «گروه عمومی» را بزن تا اینجا پیدا شود 🙂</div>';
+        return;
+    }
+    box.innerHTML = publicGroupsCache.map(g => `
+        <div class="admin-row">
+            <div style="min-width:0; flex:1;">
+                <div class="ar-name">👥 ${esc(g.name)}</div>
+                <div class="ar-sub" style="line-height:1.9;">${fa(g.members_count)} عضو${g.joined ? ' · عضو هستی ✅' : ''}</div>
+            </div>
+            <div class="ar-actions">
+                ${g.joined
+                    ? `<button class="btn btn-ghost" style="padding:5px 10px; font-size:11px;" onclick="openGroupById(${g.id})">باز کن</button>`
+                    : `<button class="btn" style="padding:5px 10px; font-size:11px;" onclick="joinPublicGroup(${g.id})">پیوستن</button>`}
+            </div>
+        </div>
+    `).join('');
+}
+
+function joinPublicGroup(gid) {
+    apiFetch(`/group_join/${gid}`, { method: 'POST' }).then(r => r.json()).then(res => {
+        toast(res.message, res.success ? 'success' : 'error');
+        if (res.success) { loadGroups(); loadPublicGroups(); }
+    }).catch(() => toast('پیوستن ناموفق بود', 'error'));
+}
+
+/** از فهرست گروه‌های عمومی به گفتگوی همان گروه می‌رود */
+function openGroupById(gid) {
+    const g = (groupsCache || []).find(x => x.id == gid);
+    switchTab('chat', document.querySelector('[data-tab="chat"]'));
+    if (!g) { toast('گروه را در فهرست گفتگوها باز کن', 'warning'); return; }
+    selectGroup(g);
+}
+
 /* ═══════════ رویدادها (کشف رویدادها) ═══════════ */
 let eventsCache = [];
 
@@ -3430,7 +3504,7 @@ function switchTab(tab, el) {
     const meta = TAB_META[tab] || { title: tab, sub: '' };
     document.getElementById('tbTitle').textContent = meta.title;
     document.getElementById('tbSub').textContent = meta.sub;
-    if (tab === 'explore') { loadExplore(); loadEvents(); }
+    if (tab === 'explore') { loadExplore(); loadEvents(); loadPublicGroups(); }
     if (tab === 'lan') loadLanHosts();
     if (tab === 'admin') { loadAdminStats(); loadBannedIps(); }
     if (tab === 'voice') {
@@ -3528,9 +3602,11 @@ function startCall(withVideo) {
     callRingTimeout = setTimeout(() => { if (callPeer && !callStartedAt) endCall('پاسخی داده نشد'); }, 45000);
 }
 
-async function beginCall(peer, withVideo, isCaller) {
+async function beginCall(peer, withVideo, isCaller, existingCallId) {
     callPeer = peer; callIsVideo = !!withVideo; callIsCaller = !!isCaller;
-    callId = Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+    /* پاسخ‌دهنده باید همان شناسهٔ پیشنهاد را نگه دارد، وگرنه دو طرف
+       هرکدام با یک callId دیگر سیگنال می‌فرستند و سیگنال‌ها دور ریخته می‌شوند. */
+    callId = existingCallId || (Date.now() + '-' + Math.random().toString(36).slice(2, 8));
     callStartedAt = 0; micMuted = false; speakerOn = false; camEnabled = !!withVideo;
 
     const ov = document.getElementById('callOverlay');
@@ -3583,7 +3659,7 @@ async function answerCall() {
     stopRing();
     incomingCall = null;
     const u = allUsersCache.find(x => x.id === data.from) || { id: data.from, full_name: data.fromName, username: '' };
-    await beginCall(u, data.video, false);
+    await beginCall(u, data.video, false, data.callId);
     if (!callPC) return;
     socket.emit('call_accept', { to: data.from, callId: data.callId });
     setCallState('در حال اتصال…');
@@ -3657,6 +3733,7 @@ function bindCallSignals(socket) {
     });
     socket.on('call_accept', async (d) => {
         if (!callPC || !callIsCaller) return;
+        if (d.callId && callId && d.callId !== callId) return;
         if (callRingTimeout) { clearTimeout(callRingTimeout); callRingTimeout = null; }
         stopRing();
         setCallState('طرف مقابل پاسخ داد…');
@@ -3666,6 +3743,8 @@ function bindCallSignals(socket) {
     });
     socket.on('call_signal', async (d) => {
         if (!callPC) return;
+        /* نامزد یخ یا SDPِ دیرهنگامِ تماسِ قبلی نباید به تماسِ جاری برسد */
+        if (d.callId && callId && d.callId !== callId) return;
         try {
             if (d.sdp && d.sdp.type === 'offer') {
                 await callPC.setRemoteDescription(d.sdp);
@@ -3681,10 +3760,14 @@ function bindCallSignals(socket) {
     });
     socket.on('call_reject', (d) => {
         if (!callPeer) return;
+        if (d.callId && callId && d.callId !== callId) return;
         cleanupCall();
         toast(d.reason === 'busy' ? `${callLabelBusy(d)} مشغول است` : 'تماس رد شد', 'warning');
     });
-    socket.on('call_end', () => { cleanupCall(); });
+    socket.on('call_end', (d) => {
+        if (d && d.callId && callId && d.callId !== callId) return;
+        cleanupCall();
+    });
 }
 function callLabelBusy(d) { const u = allUsersCache.find(x => x.id === d.from); return u ? u.full_name : 'طرف مقابل'; }
 
