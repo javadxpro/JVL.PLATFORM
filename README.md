@@ -40,7 +40,7 @@ git push origin arena/ac24cb6b-jvl-platform
 npm install
 npm start          # سرور نود روی http://localhost:3000  → حالت REST
 npx http-server .  # یا هر سرور استاتیک دیگر            → حالت MQTT
-npm test           # ۱۴۵ تست
+npm test           # ۱۴۷ تست
 npm run doctor     # سلامت نصب + همگامی نسخهٔ صفحه با سرور
 ```
 
@@ -93,7 +93,7 @@ tests/
   mqtt.test.js      ۱۹ تست لایهٔ MQTT با بروکر واقعی aedes (حضور، ارادهٔ کهنه، رویدادها، گروه عمومی، برابری هش شماره)
   browser.test.js   ۲۳ تست index.html واقعی در jsdom (ورود، رسانه، تماس، اتاق صوتی، رویدادها، کشف گروه، مخاطبین، vcf، کانال، تیک)
   pages.test.js     ۸ تست آمادهٔ Pages بودن (مسیر نسبی، دارایی‌ها، شبه‌مرورگر)
-  parity.test.js    ۵ تست هم‌ارزیِ دو لایه (مسیرها، رویدادها، شناسه‌های DOM)
+  parity.test.js    ۷ تست هم‌ارزیِ دو لایه (مسیرهای سرور/شیم/کلاینت، رویدادها، شناسه‌های DOM)
 docs/API.md                      جدول مسیرها و رویدادها
 docs/MQTT.md                     معماری MQTT، نقشهٔ تاپیک‌ها، محدودیت‌ها
 docs/Voice Chat.md               مشخصات گفتگوی صوتی + وضعیت فعلی و ملاحظات فنی

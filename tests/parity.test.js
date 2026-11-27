@@ -92,6 +92,74 @@ test('مسیرهای فقط‌سرور همان استثناهای مستند ه
         'این استثناها دیگر وجود ندارند؛ از SERVER_ONLY پاکشان کن تا فهرست کهنه نماند');
 });
 
+/* ───────── مسیرهایی که خودِ کلاینت صدا می‌زند ───────── */
+
+/**
+ * هر مسیری که index.html با apiFetch می‌خواند. هم شکلِ کامل
+ * (`apiFetch('/users'`) و هم پیشوندها (`apiFetch('/group_join/' + gid)` و
+ * قالب‌های `${}`) گرفته می‌شوند؛ فراخوانی با متغیرِ مسیر قابلِ دیدن نیست و
+ * رد می‌شود.
+ */
+function clientPaths() {
+    const html = read('index.html');
+    const exact = new Set();
+    const prefix = new Set();
+    for (const m of html.matchAll(/apiFetch\(\s*'([^']+)'\s*(\+|,|\))/g)) {
+        (m[2] === '+' ? prefix : exact).add(m[1]);
+    }
+    for (const m of html.matchAll(/apiFetch\(\s*`([^`$]+)\$/g)) prefix.add(m[1]);
+    return { exact, prefix };
+}
+
+/** مجموعهٔ «METHOD /path» را به مجموعهٔ «/path» تبدیل می‌کند */
+const pathsOnly = set => [...set].map(r => r.replace(/^[A-Z]+ /, ''));
+
+/**
+ * مسیرِ کامل باید **دقیقاً** وجود داشته باشد؛ پیشوند (جایی که کلاینت شناسه را
+ * با `+` یا `${}` می‌چسباند) با startsWith سنجیده می‌شود. تطابقِ شل برای مسیرِ
+ * کامل خطرناک است: `/set_phone_DISABLED` هم با `/set_phone` مطابقت می‌کرد و
+ * تست، همان باگی را که برای گرفتنش نوشته شده بود، رد می‌کرد.
+ */
+function covered(p, routes, isPrefix) {
+    /* پیشوندی که query string می‌چسباند (`'/public_groups' + '?q=…'`) مسیرِ کامل است */
+    if (!isPrefix || !p.endsWith('/')) return routes.includes(p);
+    /* `/group_join/` → `/group_join/:X`؛ و `/user_profile/` → `/user_profile/:X/:X` */
+    return routes.some(r => r === `${p}:X` || r.startsWith(`${p}:X/`));
+}
+
+test('هر مسیری که کلاینت صدا می‌زند در سرور نود هست', () => {
+    const { exact, prefix } = clientPaths();
+
+    const routes = pathsOnly(serverRoutes());
+    const gone = [];
+    for (const x of exact) if (!covered(norm(x), routes, false)) gone.push(norm(x));
+    for (const x of prefix) if (!covered(norm(x), routes, true)) gone.push(norm(x) + '…');
+    assert.deepEqual(gone.sort(), [],
+        'کلاینت مسیری را صدا می‌زند که سرور ندارد — در حالت REST با ۴۰۴ می‌میرد (همان باگی که /set_phone داشت)');
+});
+
+test('مسیرهای کلاینت در حالت MQTT هم کار می‌کنند، مگر استثناهای مستند', () => {
+    const { exact, prefix } = clientPaths();
+    const shim = pathsOnly(shimRoutes());
+    const allowed = pathsOnly(SERVER_ONLY);
+
+    /*
+     * بنِ نشانی و Web Push ذاتاً به سرور نیاز دارند، پس در حالت MQTT جواب
+     * نمی‌دهند و رابط هم صادقانه همین را می‌گوید. هر موردِ تازه یعنی یک
+     * قابلیت که بی‌خبر در حالت Pages کار نمی‌کند.
+     */
+    const unexplained = [];
+    const ok = (p, isPrefix) => {
+        if (covered(p, shim, isPrefix)) return true;
+        /* جزو استثناهای مستند است؟ */
+        return allowed.some(a => a === p || (isPrefix && a.startsWith(p)));
+    };
+    for (const x of exact) if (!ok(norm(x), false)) unexplained.push(norm(x));
+    for (const x of prefix) if (!ok(norm(x), true)) unexplained.push(norm(x) + '…');
+    assert.deepEqual(unexplained.sort(), [],
+        'این مسیرها در لایهٔ MQTT نیستند و جزو استثناهای مستند هم نیستند');
+});
+
 /* ───────── رویدادهای Socket.IO ───────── */
 
 /** نام‌های لیترالی که به یک تابعِ انتشار داده شده‌اند */
