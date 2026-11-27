@@ -735,4 +735,65 @@ test('فهرست گروه‌های عمومی بدون ورود دیده نمی�
     assert.equal((await srv.client().post('/group_join/1', {})).status, 401);
 });
 
+/* ───────── همسان‌سازی مخاطبین ───────── */
+
+/*
+ * این مقدار ثابت، قرارداد مشترکِ دو لایه است: server/phone.js و
+ * static/js/mqtt-backend.js باید هر دو همین را بسازند، وگرنه کاربری که
+ * شماره‌اش را در یک حالت ثبت کرده در حالت دیگر پیدا نمی‌شود.
+ * تست مرورگر هم روی همین رشته قفل شده است.
+ */
+const PHONE_HASH = 'p5dd345c68d0791a572b0fa3c';
+
+test('ثبت شماره: هر چهار شکل نوشتن یک هش می‌دهد', async () => {
+    assert.equal((await bob.post('/set_phone', { phone: '09121234567' })).body.success, true);
+    for (const v of ['+989121234567', '989121234567', '00989121234567']) {
+        assert.equal((await bob.post('/phone_hash', { phone: v })).body.hash, PHONE_HASH, `شکل ${v}`);
+    }
+    assert.equal((await bob.post('/phone_hash', { phone: 'abc' })).body.success, false, 'شمارهٔ نامعتبر');
+    assert.equal((await bob.post('/set_phone', { phone: '+++' })).body.success, false);
+});
+
+test('پیدا کردن آشنا از روی هش و از روی شمارهٔ خام', async () => {
+    const byHash = await zed.post('/contacts_lookup', { hashes: [PHONE_HASH] });
+    assert.equal(byHash.body.matches.length, 1);
+    assert.equal(byHash.body.matches[0].username, 'bob');
+    assert.equal(byHash.body.matches[0].hash, PHONE_HASH);
+    assert.equal(typeof byHash.body.matches[0].is_online, 'boolean');
+    assert.ok(!('phone_hash' in byHash.body.matches[0]), 'فیلد داخلی نباید برگردد');
+
+    const byRaw = await zed.post('/contacts_lookup', { hashes: ['09121234567', '+98 912 123 4567'] });
+    assert.equal(byRaw.body.matches.length, 1, 'یک شماره با دو نوشتار نباید دوبار بیاید');
+    assert.equal(byRaw.body.checked, 2, 'checked همان تعداد ورودی است');
+
+    assert.equal((await zed.post('/contacts_lookup', { hashes: ['09351110000'] })).body.matches.length, 0);
+    assert.equal((await zed.post('/contacts_lookup', {})).body.matches.length, 0, 'ورودی نامعتبر');
+});
+
+test('کاربر خودش را نمی‌بیند و شمارهٔ خام هیچ‌جا لو نمی‌رود', async () => {
+    assert.equal((await bob.post('/contacts_lookup', { hashes: ['09121234567'] })).body.matches.length, 0,
+        'شمارهٔ خود کاربر باید فیلتر شود');
+
+    const users = await zed.get('/users');
+    assert.ok(!JSON.stringify(users.body).includes('9121234567'), 'شمارهٔ خام در /users لو رفت');
+    const found = await zed.post('/contacts_lookup', { hashes: ['09121234567'] });
+    assert.ok(!JSON.stringify(found.body).includes('9121234567'), 'شمارهٔ خام در پاسخ lookup لو رفت');
+});
+
+test('شمارهٔ گرفته‌شده به حساب دیگری وصل نمی‌شود', async () => {
+    const r = await zed.post('/set_phone', { phone: '09121234567' });
+    assert.equal(r.status, 409);
+    assert.match(r.body.message, /حساب دیگری/);
+    /* ثبت ناموفق نباید شمارهٔ صاحبش را ببرد */
+    const still = await alice.post('/contacts_lookup', { hashes: ['09121234567'] });
+    assert.equal(still.body.matches.length, 1);
+    assert.equal(still.body.matches[0].username, 'bob');
+});
+
+test('مسیرهای مخاطبین بدون ورود بسته‌اند', async () => {
+    assert.equal((await srv.client().post('/set_phone', { phone: '09121234567' })).status, 401);
+    assert.equal((await srv.client().post('/phone_hash', { phone: '09121234567' })).status, 401);
+    assert.equal((await srv.client().post('/contacts_lookup', { hashes: [] })).status, 401);
+});
+
 test.after(async () => { if (srv) await srv.close(); });

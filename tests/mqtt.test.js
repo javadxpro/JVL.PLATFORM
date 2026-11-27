@@ -614,6 +614,26 @@ test('کشف گروه عمومی روی MQTT مثل سمت سرور کار می�
     assert.equal((await bob.post('/group_join/99999999', {})).status, 404);
 });
 
+test('هش شماره در لایهٔ MQTT همان چیزی است که سرور نود می‌سازد', async () => {
+    /*
+     * یک کاربر ممکن است شماره‌اش را در حالت MQTT ثبت کند و دیگری در حالت سرور
+     * دنبالش بگردد. اگر این رشته با tests/api.test.js فرق کند، دو حالت دو دنیای
+     * جدا شده‌اند.
+     */
+    for (const v of ['09121234567', '+989121234567', '989121234567', '00989121234567']) {
+        const r = await alice.post('/phone_hash', { phone: v });
+        assert.equal(r.body.hash, 'p5dd345c68d0791a572b0fa3c', `شکل ${v}`);
+    }
+    assert.equal((await alice.post('/phone_hash', { phone: 'abc' })).body.success, false);
+
+    /* ثبت و پیدا کردن هم روی همان هش کار کند */
+    assert.equal((await alice.post('/set_phone', { phone: '09121234567' })).body.success, true);
+    await waitFor(async () => (await bob.post('/contacts_lookup', { hashes: ['09121234567'] }))
+        .body.matches.some(m => m.username === 'alice'), 15000, 'رسیدن هش شماره به کش بابک');
+    assert.equal((await alice.post('/contacts_lookup', { hashes: ['09121234567'] })).body.matches.length, 0,
+        'کاربر خودش را نبیند');
+});
+
 test.after(async () => {
     /* کلاینت‌های MQTT را ببند، وگرنه reconnect باز می‌ماند و پروسه تمام نمی‌شود */
     for (const c of allClients) { try { c.mod.shutdown(); } catch { /* ignore */ } }

@@ -40,7 +40,9 @@ CREATE TABLE IF NOT EXISTS users (
     banned_at     TEXT    DEFAULT NULL,
     banned_by     INTEGER DEFAULT NULL,
     banned_reason TEXT    DEFAULT '',
-    last_ip       TEXT    DEFAULT NULL
+    last_ip       TEXT    DEFAULT NULL,
+    /* فقط هشِ شماره — شمارهٔ خام هرگز ذخیره نمی‌شود */
+    phone_hash    TEXT    DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS banned_ips (
@@ -289,7 +291,8 @@ class Db {
             banned_at: 'TEXT DEFAULT NULL',
             banned_by: 'INTEGER DEFAULT NULL',
             banned_reason: "TEXT DEFAULT ''",
-            last_ip: 'TEXT DEFAULT NULL'
+            last_ip: 'TEXT DEFAULT NULL',
+            phone_hash: 'TEXT DEFAULT NULL'
         });
         this.ensureColumns('groups', {
             is_public: 'INTEGER NOT NULL DEFAULT 0'

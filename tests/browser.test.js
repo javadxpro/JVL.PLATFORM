@@ -464,6 +464,26 @@ test('همسان‌سازی مخاطبین: شمارهٔ ثبت‌شده با ه
     assert.equal(saved.success, true, JSON.stringify(saved));
 
     /*
+     * jsdom پیاده‌سازی SubtleCrypto ندارد، پس لایهٔ MQTT در این محیط به
+     * fallbackHash می‌افتد و مقدارش با مرورگر واقعی فرق می‌کند. چیزی که اینجا
+     * قابل آزمایش است هم‌ارزیِ نوشتارهای یک شماره است؛ برابریِ خودِ الگوریتم با
+     * server/phone.js را tests/mqtt.test.js می‌سنجد (آنجا شیم داخل نود اجرا
+     * می‌شود و SubtleCrypto دارد، پس روی همان رشتهٔ ثابت قفل شده).
+     */
+    const hashOf = phone => a.win.fetch('/phone_hash', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ phone })
+    }).then(r => r.json()).then(h => h.hash);
+    const baseHash = await hashOf('09121234567');
+    /*
+     * طول عمداً باز است: sha256 واقعی ۲۴ رقم می‌دهد ولی fallbackHash (که بدون
+     * SubtleCrypto استفاده می‌شود) کوتاه‌تر است و با «f» شروع می‌شود.
+     */
+    assert.match(baseHash, /^p[0-9a-f]{16,24}$/, 'هش باید p + hex باشد: ' + baseHash);
+    for (const v of ['+989121234567', '989121234567', '00989121234567']) {
+        assert.equal(await hashOf(v), baseHash, `شکل ${v} باید همان هش را بدهد`);
+    }
+
+    /*
      * پیام retained باید به کاربر دوم برسد؛ مثل دنیای واقعی کمی طول می‌کشد.
      */
     const lookup = async (win, phone) => (await win.fetch('/contacts_lookup', {
